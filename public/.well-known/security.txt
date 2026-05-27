@@ -1,0 +1,4 @@
+# Fabric Flo security contact (update Contact with your domain before production)
+Contact: mailto:security@fabricflo.app
+Preferred-Languages: en
+Policy: https://app.fabricflo.com/privacy

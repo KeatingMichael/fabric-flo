@@ -1,0 +1,19 @@
+node_modules
+dist
+.DS_Store
+~$*
+*.tsbuildinfo
+*.local
+.env
+.env.*
+!.env.example
+*.log
+coverage
+
+# Capacitor native (generated — run npm run cap:sync:full)
+# Uncomment to commit ios/android to git:
+# !ios/
+# !android/
+.idea
+.vscode/*
+!.vscode/extensions.json
