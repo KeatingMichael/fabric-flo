@@ -20,7 +20,7 @@ const OUTSIDE_CURSOR = [
   "Create Apple Developer + Google Play developer accounts",
   "Install full Xcode + CocoaPods; sign app; upload to TestFlight / Play",
   "Deploy on Netlify (see docs/NETLIFY_DEPLOY.md) and set Site environment variables",
-  "Run Supabase migrations 001–008 in your project SQL editor",
+  "Run Supabase migrations 001–009 (or paste APPLY_ALL_MIGRATIONS.sql from npm run supabase:bundle)",
   "Optional: supabase functions deploy delete-account",
   "Smoke-test coordinator flow: two browsers, sign in, invite code, accept, scan — same log on both when online",
   "Attorney review of Privacy Policy and Terms",

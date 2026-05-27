@@ -15,7 +15,9 @@
     "legal:pdf": "node scripts/generate-legal-pdf.mjs",
     "store:pdf": "node scripts/generate-store-checklist-pdf.mjs",
     "verify:release": "node scripts/verify-release.mjs",
-    "fabric-catalog:import": "node scripts/import-fabric-type-catalog.mjs"
+    "fabric-catalog:import": "node scripts/import-fabric-type-catalog.mjs",
+    "supabase:bundle": "node scripts/bundle-supabase-migrations.mjs",
+    "netlify:deploy": "npm run build && npx netlify-cli deploy --prod --dir=dist"
   },
   "dependencies": {
     "@capacitor/android": "^6.2.0",

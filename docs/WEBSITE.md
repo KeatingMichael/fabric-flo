@@ -27,7 +27,7 @@ See **[NETLIFY_DEPLOY.md](./NETLIFY_DEPLOY.md)**. Summary:
 
 1. Connect repo → build `npm run build` → publish `dist`
 2. Set all `VITE_*` env vars (especially `VITE_PUBLIC_APP_URL` = your live URL)
-3. Run Supabase migrations `001`–`008`
+3. Run Supabase migrations (`npm run supabase:bundle` → `supabase/APPLY_ALL_MIGRATIONS.sql`, or `001`–`009`)
 4. Supabase Auth → Site URL = your production URL
 
 After deploy, verify:

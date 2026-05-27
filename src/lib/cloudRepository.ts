@@ -1,4 +1,12 @@
-import type { AppData, ProductionMemberRole } from "@/types";
+import type {
+  AppData,
+  InventoryItem,
+  InviteRecipient,
+  NamedLocation,
+  Production,
+  ProductionMemberRole,
+  ScanLogEntry,
+} from "@/types";
 import { isProductionMemberRole } from "@/lib/productionPermissions";
 import type { ParsedImportRow } from "@/lib/inventoryImport";
 import { getSupabase } from "@/lib/supabase";
@@ -49,18 +57,52 @@ export async function upsertUserAppState(userId: string, state: AppData): Promis
   if (error) throw error;
 }
 
+/** JSON payload for `fabric_flo_push` (settings flattened on each production). */
+export type FabricFloPushState = {
+  productions: Array<{
+    id: string;
+    name: string;
+    createdAt: string;
+    departmentHeadPin: string | null;
+    rentalHouseName: string | null;
+    inviteRecipients: InviteRecipient[];
+    locations: NamedLocation[];
+    items: InventoryItem[];
+  }>;
+  scanLog: ScanLogEntry[];
+  activeProductionId: string | null;
+};
+
+function productionForCloudPush(p: Production) {
+  return {
+    id: p.id,
+    name: p.name,
+    createdAt: p.createdAt,
+    departmentHeadPin: p.departmentHeadPin ?? null,
+    rentalHouseName: p.rentalHouseName ?? null,
+    inviteRecipients: p.inviteRecipients ?? [],
+    locations: p.locations,
+    items: p.items,
+  };
+}
+
 export function buildFabricFloPushArgs(app: AppData): {
-  state: Omit<AppData, "productionVersions">;
+  state: FabricFloPushState;
   expectedVersions: Record<string, number>;
 } {
-  const { productionVersions, ...state } = app;
+  const { productionVersions, scanLog, activeProductionId, productions } = app;
   const expectedVersions: Record<string, number> = {};
   if (productionVersions) {
-    for (const p of state.productions) {
+    for (const p of productions) {
       const v = productionVersions[p.id];
       if (typeof v === "number" && Number.isFinite(v)) expectedVersions[p.id] = v;
     }
   }
+  const state = {
+    productions: productions.map(productionForCloudPush),
+    scanLog,
+    activeProductionId,
+  };
   return { state, expectedVersions };
 }
 

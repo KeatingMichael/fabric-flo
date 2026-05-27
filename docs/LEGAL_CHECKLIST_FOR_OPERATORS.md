@@ -184,7 +184,7 @@ Fabric Flo is a **workplace** tool. Privacy Policy states it is **not directed a
 
 | Phase | Actions |
 |-------|---------|
-| **Now** | Lawyer review of Terms/Privacy; set production `.env`; run migrations 001–008 |
+| **Now** | Lawyer review of Terms/Privacy; set production `.env`; run migrations 001–009 |
 | **Pre–TestFlight** | Public HTTPS privacy URL; demo account; camera permission strings in native projects |
 | **Beta** | Test account deletion, invites, offline sync; fix Privacy Policy gaps counsel identifies |
 | **Submit** | Complete Apple/Google data forms; age rating 4+; support URL live |

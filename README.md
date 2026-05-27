@@ -18,8 +18,10 @@ See **[docs/WEBSITE.md](docs/WEBSITE.md)** for deploying the website + web app t
 
 ## Cloud sync (Supabase)
 
+See **[docs/BACKEND_SETUP.md](docs/BACKEND_SETUP.md)** for the full checklist.
+
 1. Create a project at [Supabase](https://supabase.com/).
-2. In **SQL Editor**, run migrations in order: `supabase/migrations/001` through `008`.
+2. Run `npm run supabase:bundle` and paste **`supabase/APPLY_ALL_MIGRATIONS.sql`** in the SQL Editor (or run `001`–`009` one by one).
 3. **Authentication → Providers:** enable **Email** (set “Confirm email” per your rollout).
 4. Copy **Project URL** and **anon** key into `.env` (see `.env.example`).
 5. Set `VITE_FABRIC_FLO_BACKEND=normalized` for multi-user productions and invites.

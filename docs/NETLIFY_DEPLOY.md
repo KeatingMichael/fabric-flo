@@ -56,7 +56,7 @@ Enable **Email** provider under Authentication → Providers.
 
 In Supabase **SQL Editor**, run each file in order:
 
-`supabase/migrations/001_user_app_state.sql` … through `008_fabric_flo_delete_account.sql`
+`supabase/migrations/001_user_app_state.sql` … through `009_production_settings_scan_method.sql`, or run the bundled `supabase/APPLY_ALL_MIGRATIONS.sql` (`npm run supabase:bundle`)
 
 ## 5. Verify after deploy
 

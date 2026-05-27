@@ -8,7 +8,7 @@ Fabric Flo ships as a **Vite web app** wrapped with **Capacitor** for iOS and An
 |------|--------|
 | Apple Developer Program | $99/year — [developer.apple.com](https://developer.apple.com) |
 | Google Play Console | $25 one-time |
-| Production Supabase | All migrations `001`–`008` applied; `VITE_FABRIC_FLO_BACKEND=normalized` |
+| Production Supabase | All migrations `001`–`009` applied; `VITE_FABRIC_FLO_BACKEND=normalized` |
 | Public HTTPS host | e.g. `https://app.fabricflo.com` — used for password reset and **Privacy Policy URL** in store listings |
 | Support emails | Set `VITE_SUPPORT_EMAIL` and `VITE_PRIVACY_EMAIL` in production `.env` |
 
@@ -25,7 +25,7 @@ VITE_SUPPORT_EMAIL=support@fabricflo.app
 VITE_PRIVACY_EMAIL=privacy@fabricflo.app
 ```
 
-Run SQL migrations in order in the Supabase SQL editor (or CI).
+Run SQL migrations in order in the Supabase SQL editor (`npm run supabase:bundle` → `supabase/APPLY_ALL_MIGRATIONS.sql`).
 
 ## 2. Build web assets
 

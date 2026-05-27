@@ -7,7 +7,7 @@ Fabric Flo ships as a **Vite web app** wrapped with **Capacitor** for iOS and An
 - Apple Developer Program ($99/year) and a Mac with Xcode
 - Google Play Console ($25 one-time)
 - Production hosting over **HTTPS** (for Privacy Policy URL and password reset)
-- Supabase project with migrations `001`–`008` and `VITE_FABRIC_FLO_BACKEND=normalized`
+- Supabase project with migrations `001`–`009` and `VITE_FABRIC_FLO_BACKEND=normalized`
 
 For the full store checklist (privacy labels, account deletion, TestFlight), see **[STORE_RELEASE.md](./STORE_RELEASE.md)**.
 

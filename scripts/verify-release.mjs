@@ -18,8 +18,8 @@ function fail(msg) {
 const migDir = join(root, "supabase", "migrations");
 if (existsSync(migDir)) {
   const files = readdirSync(migDir).filter((f) => f.endsWith(".sql")).sort();
-  if (files.length >= 8) ok(`${files.length} SQL migrations present`);
-  else fail(`Expected 8+ migrations, found ${files.length}`);
+  if (files.length >= 9) ok(`${files.length} SQL migrations present`);
+  else fail(`Expected 9+ migrations, found ${files.length}`);
 } else {
   fail("supabase/migrations missing");
 }

@@ -20,10 +20,10 @@ Authenticated users call Supabase RPCs with the anon key and a valid JWT. Direct
 
 ### `p_state` shape (aligned with `AppData`)
 
-- `productions`: array of `{ id, name, createdAt?, departmentHeadPin?, locations[], items[] }`. Optional `settings` jsonb is merged into `productions.settings` on the server. `departmentHeadPin` is copied into `settings.departmentHeadPin` for backward compatibility with the client.
+- `productions`: array of `{ id, name, createdAt?, departmentHeadPin?, rentalHouseName?, inviteRecipients?, locations[], items[] }`. Top-level `departmentHeadPin`, `rentalHouseName`, and `inviteRecipients` are merged into `productions.settings` on the server (migration `009`).
 - `locations[]`: `{ id?, kind, name, sort_order? }` (`sort_order` defaults to 0).
 - `items[]`: `{ id?, kind, name, qrAliases[], notes?, condition? }`.
-- `scanLog[]`: only rows whose `productionId` appears in `productions[]` are applied. Fields: `id?, productionId, itemId, locationId, itemKind, itemName, locationKind, locationLabel, scannedAt?, rawQr`, optional `idempotencyKey` (unique when set).
+- `scanLog[]`: only rows whose `productionId` appears in `productions[]` are applied. Fields: `id?, productionId, itemId, locationId, itemKind, itemName, locationKind, locationLabel, scannedAt?, rawQr`, optional `idempotencyKey` (unique when set), optional `scanMethod` (`qr` | `label` | `manual`, migration `009`).
 
 ### REST equivalents (if you add a BFF later)
 

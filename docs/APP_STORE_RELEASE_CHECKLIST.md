@@ -11,7 +11,7 @@ Use this with the detailed guides in the repo: `docs/STORE_RELEASE.md`, `docs/MO
 
 Stores require a **live Privacy Policy URL** and HTTPS for password reset.
 
-- [ ] **Supabase production project** — run SQL migrations `001` through `008` in order (Supabase SQL editor).
+- [ ] **Supabase production project** — run SQL migrations `001` through `009` (or paste `supabase/APPLY_ALL_MIGRATIONS.sql` from `npm run supabase:bundle`).
 - [ ] **Production environment variables** on your host (Netlify, Vercel, etc.):
   - `VITE_SUPABASE_URL`
   - `VITE_SUPABASE_ANON_KEY`
