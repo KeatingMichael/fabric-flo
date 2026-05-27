@@ -3,7 +3,9 @@
 **From UI-complete to published apps**  
 Generated for operators · May 2026 · Not legal advice
 
-Use this with the detailed guides in the repo: `docs/STORE_RELEASE.md`, `docs/MOBILE_RELEASE.md`, and the in-app **Rollout guide** (`/launch-checklist`).
+Use this with: `docs/STORE_RELEASE.md`, `docs/MOBILE_RELEASE.md`, `docs/BACKEND_SETUP.md`, `docs/INVESTOR_NETLIFY.md`, and the in-app **Rollout guide** (`/launch-checklist`).
+
+**Share with investors (phone, any location):** deploy to Netlify — `https://YOUR-SITE.netlify.app/` (marketing) and `/app` (product). Local `http://127.0.0.1:5173` only works on your Mac while `npm run dev` is running.
 
 ---
 
@@ -12,15 +14,21 @@ Use this with the detailed guides in the repo: `docs/STORE_RELEASE.md`, `docs/MO
 Stores require a **live Privacy Policy URL** and HTTPS for password reset.
 
 - [ ] **Supabase production project** — run SQL migrations `001` through `009` (or paste `supabase/APPLY_ALL_MIGRATIONS.sql` from `npm run supabase:bundle`).
-- [ ] **Production environment variables** on your host (Netlify, Vercel, etc.):
+- [ ] **Netlify (or other host)** — connect GitHub at [app.netlify.com](https://app.netlify.com) or `npm run netlify:deploy` after `npx netlify-cli login` (see `docs/INVESTOR_NETLIFY.md`).
+- [ ] **Production environment variables** on Netlify (Site configuration → Environment variables):
   - `VITE_SUPABASE_URL`
   - `VITE_SUPABASE_ANON_KEY`
   - `VITE_FABRIC_FLO_BACKEND=normalized`
-  - `VITE_PUBLIC_APP_URL` (e.g. `https://app.fabricflo.com`)
+  - `VITE_PUBLIC_APP_URL` — your live Netlify URL (e.g. `https://fabric-flo.netlify.app`), no trailing slash
   - `VITE_SUPPORT_EMAIL` and `VITE_PRIVACY_EMAIL`
-- [ ] **Deploy web build** (`npm run build`) so these URLs work:
+- [ ] **Redeploy** after setting env vars (Clear cache and deploy) — Vite bakes `VITE_*` at build time.
+- [ ] **Supabase Auth URLs** — Site URL + Redirect URLs match your Netlify domain (`https://YOUR-SITE.netlify.app/**`).
+- [ ] **Deploy web build** so these URLs work:
+  - `https://YOUR_DOMAIN/` (marketing)
+  - `https://YOUR_DOMAIN/app` (app)
   - `https://YOUR_DOMAIN/privacy`
   - `https://YOUR_DOMAIN/terms`
+  - `https://YOUR_DOMAIN/launch` (env checklist)
 - [ ] **Smoke test cloud flows** on two devices: sign in → Invite Code → crew joins → scan → shared log when online.
 - [ ] Optional: deploy `delete-account` Edge Function; set `VITE_ACCOUNT_DELETE_EDGE=1` (see `docs/STORE_RELEASE.md`).
 
@@ -62,7 +70,8 @@ The repo includes `ios/` and `android/` projects. App ID: `app.fabricflo.tracker
 - [ ] **TestFlight** (iOS) — internal testers with real QR codes and rental labels.
 - [ ] **Play internal testing** (Android) — same crew and flows.
 - [ ] **Offline test** — airplane mode → scan → place → online → sync completes.
-- [ ] **Rental list & log** — Download and Upload (CSV + PDF) on phone.
+- [ ] **Rental list & log** — Download (CSV + PDF) and Upload on phone.
+- [ ] **Fabric type catalog** — rolodex from `FABRIC LIST` xlsx (`npm run fabric-catalog:import` if you update the list).
 - [ ] **Account deletion** and delete data on device.
 - [ ] **Forgot password** email (requires correct `VITE_PUBLIC_APP_URL`).
 
@@ -105,9 +114,10 @@ The repo includes `ios/` and `android/` projects. App ID: `app.fabricflo.tracker
 
 | Area | In repo | You still need |
 |------|---------|----------------|
-| UI / flows | Largely complete | Final device QA |
-| Cloud / invites | Built | Live Supabase + env + migrations |
-| Legal pages | In-app routes | Public URLs + counsel review |
+| UI / flows | Complete (marketing `/`, app `/app`) | Final device QA |
+| Cloud / invites | Built (migrations 001–009) | Live Supabase + Netlify env + SQL apply |
+| Investor demo URL | `netlify.toml` + docs | Netlify site + env + redeploy |
+| Legal pages | In-app routes | Public HTTPS URLs + counsel review |
 | Native shells | ios/ + android/ | Icons, signing, listings |
 | Store accounts | — | Apple + Google enrollment |
 
@@ -119,6 +129,8 @@ The repo includes `ios/` and `android/` projects. App ID: `app.fabricflo.tracker
 npm run build
 npm run cap:sync:full
 npm run verify:release
+npm run supabase:bundle
+npm run netlify:deploy
 npm run legal:pdf
 npm run store:pdf
 ```
