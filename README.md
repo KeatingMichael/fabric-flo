@@ -16,6 +16,10 @@ Open the printed URL (use the **Network** address to test on a phone on the same
 
 See **[docs/WEBSITE.md](docs/WEBSITE.md)** for deploying the website + web app together.
 
+## Netlify (share with investors)
+
+**[docs/INVESTOR_NETLIFY.md](docs/INVESTOR_NETLIFY.md)** — connect this repo at [app.netlify.com](https://app.netlify.com) or run `npx netlify-cli login` then `npm run netlify:deploy`.
+
 ## Cloud sync (Supabase)
 
 See **[docs/BACKEND_SETUP.md](docs/BACKEND_SETUP.md)** for the full checklist.
