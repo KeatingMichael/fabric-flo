@@ -37,8 +37,8 @@ export function PrivacyPage() {
             (localStorage) so you can work on set without a network. We do not use advertising trackers.
           </li>
           <li>
-            <strong>Camera:</strong> Used only when you open the scanner to read QR codes on cases. We do not
-            record or upload video.
+            <strong>Camera:</strong> Used only when you open the scanner to read dynamic QR codes and labels on
+            fabrics and their matching bags. We do not record or upload video.
           </li>
         </ul>
       </section>

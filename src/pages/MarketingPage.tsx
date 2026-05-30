@@ -43,9 +43,6 @@ export function MarketingPage() {
           <Link to="/app" className="btn btn-primary" style={{ flex: 1 }}>
             Open app
           </Link>
-          <a href="#features" className="btn btn-secondary" style={{ flex: 1 }}>
-            Features
-          </a>
         </div>
       </section>
 

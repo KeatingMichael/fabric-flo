@@ -3,7 +3,7 @@
 **From UI-complete to published apps**  
 Generated for operators · May 2026 · Not legal advice
 
-Use this with: `docs/STORE_RELEASE.md`, `docs/MOBILE_RELEASE.md`, `docs/BACKEND_SETUP.md`, `docs/INVESTOR_NETLIFY.md`, and the in-app **Rollout guide** (`/launch-checklist`).
+Use this with: `docs/STORE_RELEASE.md`, `docs/MOBILE_RELEASE.md`, `docs/BACKEND_SETUP.md`, `docs/INVESTOR_NETLIFY.md`, `docs/STORE_LISTING.md` (listing copy), `docs/APP_REVIEW_NOTES.md` (reviewer notes + demo account), and the in-app **Rollout guide** (`/launch-checklist`).
 
 **Share with investors (phone, any location):** deploy to Netlify — `https://YOUR-SITE.netlify.app/` (marketing) and `/app` (product). Local `http://127.0.0.1:5173` only works on your Mac while `npm run dev` is running.
 
@@ -57,11 +57,11 @@ The repo includes `ios/` and `android/` projects. App ID: `app.fabricflo.tracker
   npm run build
   npm run cap:sync:full
   ```
-- [ ] **iOS Info.plist** — camera usage: *Fabric Flo uses the camera to scan QR codes on fabric and bag labels.*
-- [ ] **Android AndroidManifest.xml** — `CAMERA` permission.
-- [ ] **App icons** — 1024×1024 PNG (Apple, no alpha); adaptive icon (Android).
-- [ ] **Version / build numbers** — bump each store submission.
-- [ ] **Signing** — Apple certificates in Xcode; Android upload keystore (back up securely).
+- [x] **iOS Info.plist** — camera usage string set (`NSCameraUsageDescription`).
+- [x] **Android AndroidManifest.xml** — `CAMERA` permission present.
+- [x] **App icons** — generated for iOS + Android + PWA from `assets/logo.png` via `@capacitor/assets`. Master 1024×1024, no alpha. Re-run with `npx @capacitor/assets generate` after icon changes.
+- [x] **Version / build numbers** — set to `1.0.0` (build 1 / versionCode 1). Bump for each future submission.
+- [ ] **Signing** — Apple certificates in Xcode; Android upload keystore (back up securely). **(needs your Apple/Google accounts)**
 
 ---
 
@@ -118,7 +118,9 @@ The repo includes `ios/` and `android/` projects. App ID: `app.fabricflo.tracker
 | Cloud / invites | Built (migrations 001–009) | Live Supabase + Netlify env + SQL apply |
 | Investor demo URL | `netlify.toml` + docs | Netlify site + env + redeploy |
 | Legal pages | In-app routes | Public HTTPS URLs + counsel review |
-| Native shells | ios/ + android/ | Icons, signing, listings |
+| Native shells | ios/ + android/ + **icons & splashes generated** | Signing, build on your Mac |
+| Listing copy | `docs/STORE_LISTING.md` drafted | Fill domain/email, capture screenshots |
+| Reviewer notes | `docs/APP_REVIEW_NOTES.md` drafted | Create demo account on live backend |
 | Store accounts | — | Apple + Google enrollment |
 
 ---
