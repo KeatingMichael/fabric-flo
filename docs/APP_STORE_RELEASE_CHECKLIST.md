@@ -129,6 +129,7 @@ The repo includes `ios/` and `android/` projects. App ID: `app.fabricflo.tracker
 
 ```
 npm run build
+npm run build:native   # Mac: build + icons + cap sync, then open Xcode/Android Studio
 npm run cap:sync:full
 npm run verify:release
 npm run supabase:bundle
