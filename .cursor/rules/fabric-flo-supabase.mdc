@@ -1,0 +1,41 @@
+---
+description: Fabric Flo Supabase backend - RPCs, push/pull shape, and sync model
+globs: supabase/**,src/lib/cloudRepository.ts,src/types.ts
+---
+
+# Fabric Flo Supabase backend
+
+Two persistence modes (see [docs/BACKEND_API.md](mdc:docs/BACKEND_API.md)):
+
+1. **Legacy blob** — table `user_app_state`, one JSON `state` column per user (migration `001`).
+2. **Normalized** — Postgres tables + RLS (`002`) and RPCs (`003`+). Enabled with
+   `VITE_FABRIC_FLO_BACKEND=normalized`. Multi-crew productions and Invite Codes require this mode.
+
+## RPCs
+
+| RPC | Purpose |
+|-----|---------|
+| `fabric_flo_create_production` | Create a production + caller as `admin`. |
+| `fabric_flo_pull` | Bundle: `productions`, `scanLog`, `activeProductionId` (null), `versions` map. |
+| `fabric_flo_push` | Replace child rows per production the caller may edit; optimistic lock via `p_expected_versions`. |
+| `fabric_flo_create_invite` / `fabric_flo_accept_invite` | Invite Codes (token stored as hash). |
+| `fabric_flo_import_inventory_rows` | CSV import; one row = one physical piece. |
+| `fabric_flo_delete_my_account` | Account deletion (migration `008`). |
+
+## Push/pull invariants
+
+- **Push is a full snapshot per production**: the server deletes and re-inserts that production's
+  locations, inventory items, qr aliases, and scan events from `p_state`.
+- Settings fields are flattened onto each production for push and rehydrated on pull:
+  `rentalHouseName`, `inviteRecipients`, `departmentHeadPin` (`productions.settings`, migration `009`).
+- `scan_events.scan_method` (`qr` | `label` | `manual`) is migration `009`.
+- Scans carry an `idempotencyKey` so retries use `ON CONFLICT DO NOTHING` (no duplicates).
+- The client tracks `productionVersions`; on `version_conflict` (SQLSTATE `P0001`) it should pull,
+  merge, and retry. See [docs/SYNC.md](mdc:docs/SYNC.md).
+
+The client mapping lives in [src/lib/cloudRepository.ts](mdc:src/lib/cloudRepository.ts)
+(`productionForCloudPush`, `buildFabricFloPushArgs`, `FabricFloPushState`). Keep the push payload
+shape aligned with the `fabric_flo_push` SQL in `supabase/migrations/009_*.sql`.
+
+Do not change migrations or RPC behavior without updating
+[docs/BACKEND_API.md](mdc:docs/BACKEND_API.md) and [docs/SYNC.md](mdc:docs/SYNC.md).

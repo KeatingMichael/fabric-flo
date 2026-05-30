@@ -17,7 +17,8 @@
     "verify:release": "node scripts/verify-release.mjs",
     "fabric-catalog:import": "node scripts/import-fabric-type-catalog.mjs",
     "supabase:bundle": "node scripts/bundle-supabase-migrations.mjs",
-    "netlify:deploy": "npm run build && npx netlify-cli deploy --prod --dir=dist"
+    "netlify:deploy": "npm run build && npx netlify-cli deploy --prod --dir=dist",
+    "knowledge:export": "node scripts/export-claude-knowledge-pack.mjs"
   },
   "dependencies": {
     "@capacitor/android": "^6.2.0",

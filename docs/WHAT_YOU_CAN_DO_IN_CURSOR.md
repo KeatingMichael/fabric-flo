@@ -15,6 +15,8 @@
 | SQL migrations (files) | `supabase/migrations/001`–`009` or bundled `APPLY_ALL_MIGRATIONS.sql` — **you** paste into Supabase SQL Editor |
 | Edge Function (code) | `supabase/functions/delete-account/` — **you** run `supabase functions deploy` |
 | CI on GitHub | Push repo; `.github/workflows/ci.yml` runs build |
+| Cursor AI context | `.cursor/rules/` + `AGENTS.md` load automatically (terminology + Supabase model) |
+| Claude.ai knowledge pack | `npm run knowledge:export` → upload `docs/export/Fabric_Flo_Knowledge_Pack.md` |
 
 ## ❌ Cannot complete only in Cursor (needs accounts, hardware, or counsel)
 

@@ -20,6 +20,11 @@ See **[docs/WEBSITE.md](docs/WEBSITE.md)** for deploying the website + web app t
 
 **[docs/INVESTOR_NETLIFY.md](docs/INVESTOR_NETLIFY.md)** — connect this repo at [app.netlify.com](https://app.netlify.com) or run `npx netlify-cli login` then `npm run netlify:deploy`.
 
+## Use with Claude / Cursor
+
+- **Cursor**: rules in `.cursor/rules/` and `AGENTS.md` load automatically — Claude follows Fabric Flo's terminology and backend model in this repo.
+- **Claude.ai Projects**: run `npm run knowledge:export`, then upload `docs/export/Fabric_Flo_Knowledge_Pack.md`. Product language lives in **[docs/FABRIC_FLO_GLOSSARY.md](docs/FABRIC_FLO_GLOSSARY.md)**.
+
 ## Cloud sync (Supabase)
 
 See **[docs/BACKEND_SETUP.md](docs/BACKEND_SETUP.md)** for the full checklist.

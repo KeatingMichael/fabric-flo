@@ -1,0 +1,36 @@
+---
+description: Fabric Flo product language, user flows, and terminology invariants
+alwaysApply: true
+---
+
+# Fabric Flo domain language
+
+Fabric Flo is a phone-first app for film/TV productions to track **fabrics and their matching bags**
+on set. The canonical reference is [docs/FABRIC_FLO_GLOSSARY.md](mdc:docs/FABRIC_FLO_GLOSSARY.md) —
+read it before editing user-facing copy or product flows.
+
+## Use these exact terms
+
+- **Invite Code** — the token crew use to join a production. Never write "join code".
+- **One inventory row = one fabric + matching bag pair**, tracked together under the same dynamic QR
+  or rental-house label. There is no separate Fabric vs Bag UI.
+- **Scan method** is `qr`, `label`, or `manual`.
+- **Roles**: `admin`, `department_head`, `crew`, `viewer`.
+- **Location kinds**: studio, filming location, transport truck.
+- **Routes**: `/` is the marketing site, `/app` is the productions home.
+
+## Primary flow
+
+Coordinator signs in at `/app` -> creates a production -> creates an **Invite Code** -> shares it by
+email or text -> crew enters the code -> crew scans a piece and picks a place -> it lands in the
+shared log and rental inventory.
+
+## Do not reintroduce
+
+- "Join code" wording.
+- All / Fabrics / Bags filters on Log or Inventory.
+- A separate Fabric/Bag toggle or separate bag add form.
+- Tracking fabric and bag as independent items with separate QRs/labels.
+
+When changing terminology, update [docs/FABRIC_FLO_GLOSSARY.md](mdc:docs/FABRIC_FLO_GLOSSARY.md)
+first, then run `npm run knowledge:export` to refresh the Claude knowledge pack.
