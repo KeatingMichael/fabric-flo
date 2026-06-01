@@ -1,5 +1,7 @@
 # Fabric Flo
 
+> **New here / no coding experience?** Start with **[docs/START_HERE.md](docs/START_HERE.md)** (PDF: `docs/Fabric_Flo_START_HERE.pdf`) — the simplest plain-English roadmap to getting Fabric Flo into the app stores.
+
 Phone-first app for tracking film fabrics and bags — **one physical piece per row**, each with its own **dynamic QR** for scans, plus locations and logs. Works offline on set; optional **Supabase** cloud sync with email sign-in.
 
 ## Quick start

@@ -6,6 +6,9 @@ Generated for the operator · June 2026 · Not legal advice
 App identity (already set): **App name** Fabric Flo · **Bundle/App ID** `app.fabricflo.tracker` ·
 **Version** 1.0.0 (build/versionCode 1).
 
+> **Brand new to this?** Read **`docs/START_HERE.md`** first — it's the simplest, no-jargon overview.
+> This checklist is the detailed version of that roadmap.
+
 Related docs: `docs/TRANSFER_TO_WINDOWS.md` (move to Windows), `docs/APP_STORE_RELEASE_CHECKLIST.md`
 (full reference), `docs/STORE_LISTING.md` (listing copy), `docs/APP_REVIEW_NOTES.md` (reviewer notes),
 `docs/BACKEND_SETUP.md` (Supabase), `docs/INVESTOR_NETLIFY.md` (web host).
