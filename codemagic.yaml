@@ -1,0 +1,117 @@
+# Fabric Flo — Codemagic CI/CD (cloud builds for iOS + Android)
+# ---------------------------------------------------------------------------
+# Why this exists: you can develop on Windows, but Apple requires a Mac to build
+# iOS apps. Codemagic rents cloud Macs and builds straight from this GitHub repo,
+# so you never need to own one. Android also builds here (or locally on Windows).
+#
+# Quick start:
+#   1. Sign in at https://codemagic.io with GitHub and add the `fabric-flo` repo.
+#   2. Connect your App Store Connect API key (Codemagic ▸ Teams ▸ Integrations).
+#   3. Create the variable groups below (Codemagic ▸ App settings ▸ Environment variables).
+#   4. Run the `ios-release` or `android-release` workflow.
+#
+# Docs: docs/FINISH_AND_SUBMIT_CHECKLIST.md  (App ID: app.fabricflo.tracker)
+# ---------------------------------------------------------------------------
+
+definitions:
+  # Reusable env values. Put real secrets in Codemagic UI variable groups, not here.
+  env_versions: &env_versions
+    node: 20
+  # VITE_* vars are baked into the web build at `npm run build` time. Add them to a
+  # Codemagic variable group named "fabricflo_web" (mark secrets as secure).
+  vite_build_group: &vite_build_group
+    - fabricflo_web   # VITE_SUPABASE_URL, VITE_SUPABASE_ANON_KEY,
+                      # VITE_FABRIC_FLO_BACKEND=normalized, VITE_PUBLIC_APP_URL,
+                      # VITE_SUPPORT_EMAIL, VITE_PRIVACY_EMAIL
+
+workflows:
+  # =========================================================================
+  # iOS  →  builds an .ipa on a cloud Mac and uploads to TestFlight
+  # =========================================================================
+  ios-release:
+    name: Fabric Flo iOS (App Store / TestFlight)
+    instance_type: mac_mini_m2
+    max_build_duration: 60
+    integrations:
+      # Name of the App Store Connect API key you added in Codemagic ▸ Integrations.
+      app_store_connect: FabricFloAppStoreKey
+    environment:
+      <<: *env_versions
+      groups:
+        - *vite_build_group
+      ios_signing:
+        distribution_type: app_store
+        bundle_identifier: app.fabricflo.tracker
+      vars:
+        XCODE_WORKSPACE: "ios/App/App.xcworkspace"
+        XCODE_SCHEME: "App"
+        APP_STORE_APPLE_ID: 0000000000   # <- replace with your numeric App Store app id once created
+    scripts:
+      - name: Install JS dependencies
+        script: npm ci
+      - name: Build web assets (Vite)
+        script: npm run build
+      - name: Sync web build into the iOS project
+        script: npx cap sync ios
+      - name: Install CocoaPods
+        script: |
+          cd ios/App
+          pod install
+      - name: Set up code signing
+        script: xcode-project use-profiles
+      - name: Build the .ipa
+        script: |
+          xcode-project build-ipa \
+            --workspace "$XCODE_WORKSPACE" \
+            --scheme "$XCODE_SCHEME"
+    artifacts:
+      - build/ios/ipa/*.ipa
+      - /tmp/xcodebuild_logs/*.log
+    publishing:
+      app_store_connect:
+        auth: integration
+        submit_to_testflight: true
+        # Flip to true only once your listing + metadata are complete in App Store Connect:
+        submit_to_app_store: false
+
+  # =========================================================================
+  # Android  →  builds a signed .aab for Google Play (you can also do this on Windows)
+  # =========================================================================
+  android-release:
+    name: Fabric Flo Android (Google Play)
+    instance_type: linux_x2
+    max_build_duration: 60
+    environment:
+      <<: *env_versions
+      groups:
+        - *vite_build_group
+        - fabricflo_android   # keystore vars below
+      android_signing:
+        # Upload your keystore in Codemagic ▸ App settings ▸ Code signing identities,
+        # then reference its reference name here.
+        - fabricflo_upload_keystore
+      vars:
+        PACKAGE_NAME: "app.fabricflo.tracker"
+    scripts:
+      - name: Install JS dependencies
+        script: npm ci
+      - name: Build web assets (Vite)
+        script: npm run build
+      - name: Sync web build into the Android project
+        script: npx cap sync android
+      - name: Set Android SDK location
+        script: echo "sdk.dir=$ANDROID_SDK_ROOT" > "android/local.properties"
+      - name: Build signed release App Bundle
+        script: |
+          cd android
+          ./gradlew bundleRelease
+    artifacts:
+      - android/app/build/outputs/**/*.aab
+      - android/app/build/outputs/**/mapping.txt
+    publishing:
+      google_play:
+        # Add a Google Play service account JSON in Codemagic ▸ Integrations,
+        # then set this credential reference. Start on the "internal" track.
+        credentials: $GCLOUD_SERVICE_ACCOUNT_CREDENTIALS
+        track: internal
+        submit_as_draft: true

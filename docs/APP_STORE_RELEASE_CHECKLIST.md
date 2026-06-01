@@ -5,6 +5,8 @@ Generated for operators · May 2026 · Not legal advice
 
 Use this with: `docs/STORE_RELEASE.md`, `docs/MOBILE_RELEASE.md`, `docs/BACKEND_SETUP.md`, `docs/INVESTOR_NETLIFY.md`, `docs/STORE_LISTING.md` (listing copy), `docs/APP_REVIEW_NOTES.md` (reviewer notes + demo account), and the in-app **Rollout guide** (`/launch-checklist`).
 
+> **On a Windows 11 PC?** Use `docs/TRANSFER_TO_WINDOWS.md` to move the project, then `docs/FINISH_AND_SUBMIT_CHECKLIST.md` for a Windows-aware path to both stores (Android in Android Studio; iOS via `codemagic.yaml` cloud builds — no Mac required).
+
 **Share with investors (phone, any location):** deploy to Netlify — `https://YOUR-SITE.netlify.app/` (marketing) and `/app` (product). Local `http://127.0.0.1:5173` only works on your Mac while `npm run dev` is running.
 
 ---

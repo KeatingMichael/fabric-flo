@@ -80,6 +80,13 @@ npm run cap:sync
 npm run cap:ios    # or cap:android
 ```
 
+## Move to Windows + ship to the app stores
+
+- **[docs/TRANSFER_TO_WINDOWS.md](docs/TRANSFER_TO_WINDOWS.md)** — move development to a Windows 11 PC (clone from GitHub; manual/USB fallback). PDF: `docs/Fabric_Flo_Transfer_To_Windows.pdf`.
+- **[docs/FINISH_AND_SUBMIT_CHECKLIST.md](docs/FINISH_AND_SUBMIT_CHECKLIST.md)** — Windows-aware checklist to finish Apple + Google Play. PDF: `docs/Fabric_Flo_Finish_And_Submit_Checklist.pdf`.
+- **[codemagic.yaml](codemagic.yaml)** — cloud builds for **iOS** (no Mac required) and Android.
+- Regenerate the PDFs anytime with `npm run guides:pdf`.
+
 ## Git
 
 This repo is intended to live in **this project folder only**. Add a remote on GitHub/GitLab and push:

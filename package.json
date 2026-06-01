@@ -14,6 +14,7 @@
     "cap:sync:full": "npm run build && npx cap sync && node scripts/patch-capacitor-native.mjs",
     "legal:pdf": "node scripts/generate-legal-pdf.mjs",
     "store:pdf": "node scripts/generate-store-checklist-pdf.mjs",
+    "guides:pdf": "node scripts/generate-guides-pdf.mjs",
     "verify:release": "node scripts/verify-release.mjs",
     "fabric-catalog:import": "node scripts/import-fabric-type-catalog.mjs",
     "supabase:bundle": "node scripts/bundle-supabase-migrations.mjs",
