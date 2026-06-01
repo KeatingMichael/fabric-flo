@@ -85,6 +85,7 @@ npm run cap:ios    # or cap:android
 - **[docs/TRANSFER_TO_WINDOWS.md](docs/TRANSFER_TO_WINDOWS.md)** — move development to a Windows 11 PC (clone from GitHub; manual/USB fallback). PDF: `docs/Fabric_Flo_Transfer_To_Windows.pdf`.
 - **[docs/FINISH_AND_SUBMIT_CHECKLIST.md](docs/FINISH_AND_SUBMIT_CHECKLIST.md)** — Windows-aware checklist to finish Apple + Google Play. PDF: `docs/Fabric_Flo_Finish_And_Submit_Checklist.pdf`.
 - **[codemagic.yaml](codemagic.yaml)** — cloud builds for **iOS** (no Mac required) and Android.
+- **[docs/CODEMAGIC_SETUP.md](docs/CODEMAGIC_SETUP.md)** — fill-in-the-blank sheet for the Apple/Google keys + variables Codemagic needs. PDF: `docs/Fabric_Flo_Codemagic_Setup.pdf`.
 - Regenerate the PDFs anytime with `npm run guides:pdf`.
 
 ## Git

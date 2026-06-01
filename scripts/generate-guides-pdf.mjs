@@ -22,6 +22,10 @@ const guides = [
     md: join(root, "docs", "FINISH_AND_SUBMIT_CHECKLIST.md"),
     out: join(root, "docs", "Fabric_Flo_Finish_And_Submit_Checklist.pdf"),
   },
+  {
+    md: join(root, "docs", "CODEMAGIC_SETUP.md"),
+    out: join(root, "docs", "Fabric_Flo_Codemagic_Setup.pdf"),
+  },
 ];
 
 const css = `

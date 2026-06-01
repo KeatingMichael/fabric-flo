@@ -89,7 +89,9 @@ You can do this entirely on your Windows 11 PC with **Android Studio**.
 
 ## Phase 4 — iOS via Codemagic (no Mac required)
 
-This repo includes **`codemagic.yaml`** with an `ios-release` workflow.
+This repo includes **`codemagic.yaml`** with an `ios-release` workflow. For the exact keys and
+variables to paste in, use the fill-in-the-blank sheet **`docs/CODEMAGIC_SETUP.md`**
+(PDF: `docs/Fabric_Flo_Codemagic_Setup.pdf`).
 
 - [ ] Sign in at <https://codemagic.io> with **GitHub** and authorize the `fabric-flo` repo.
 - [ ] In **Codemagic ▸ Teams ▸ Integrations**, connect your **Apple Developer / App Store Connect API key**
