@@ -26,6 +26,7 @@
     "@capacitor/android": "^6.2.0",
     "@capacitor/app": "^6.0.2",
     "@capacitor/core": "^6.2.0",
+    "@capacitor/haptics": "^6.0.3",
     "@capacitor/ios": "^6.2.0",
     "@capacitor/network": "^6.0.3",
     "@capacitor/splash-screen": "^6.0.3",
@@ -50,9 +51,9 @@
     "@types/uuid": "^10.0.0",
     "@vitejs/plugin-react": "^4.3.3",
     "md-to-pdf": "^5.2.4",
-    "xlsx": "^0.18.5",
     "typescript": "~5.6.2",
     "vite": "^5.4.10",
-    "vite-plugin-pwa": "^0.20.5"
+    "vite-plugin-pwa": "^0.20.5",
+    "xlsx": "^0.18.5"
   }
 }

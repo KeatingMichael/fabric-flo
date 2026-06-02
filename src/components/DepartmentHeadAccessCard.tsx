@@ -53,8 +53,8 @@ export function DepartmentHeadAccessCard({
       return;
     }
     if (configured) {
-      setMsg("Finish sign-in under Fabric Flo account above, then invite crew from your dashboard.");
-      document.getElementById("cloud-account")?.scrollIntoView({ behavior: "smooth", block: "start" });
+      setMsg("Sign in under Fabric Flo account above first, then come back here.");
+      document.getElementById("cloud-account")?.scrollIntoView({ behavior: "auto", block: "start" });
       return;
     }
     navigate("/dashboard");
@@ -64,8 +64,7 @@ export function DepartmentHeadAccessCard({
     <section className="card stack" id="department-head-access">
       <h2 style={{ marginTop: 0 }}>Department head access</h2>
       <p className="muted" style={{ marginBottom: 0 }}>
-        Starting a show as department head? Enter your production and email — same as a Fabric Flo account. After
-        you continue, create Invite Codes on your dashboard and send them to crew.
+        Same sign-in as above. After you open your show, create Invite Codes on the dashboard and text them to crew.
       </p>
       <form className="stack" onSubmit={(e) => void onContinue(e)}>
         {requireProductionName ? (

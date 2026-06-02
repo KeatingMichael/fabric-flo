@@ -37,15 +37,14 @@ export function HomePage() {
   return (
     <div className="page stack">
       <header className="welcome-header">
-        <h1>Welcome</h1>
+        <h1>Get started</h1>
         <p className="welcome-header__tagline">
-          An easy solution to keep tabs on fabrics with legs!
+          Track fabrics and matching bags on your production — one shared log for the whole department.
         </p>
       </header>
       <p>
-        Fabric Flo is built to track all fabrics used on your production. Start by uploading your inventory or
-        rental list. From there, you can scan labels, choose your location, studio, or transport vehicle. Every
-        scan is time-stamped and saved to your daily logs.
+        <strong>Department heads:</strong> sign in below, name your show, then invite crew with an Invite Code.{" "}
+        <strong>Crew:</strong> enter the Invite Code your department head sent you.
       </p>
 
       <CloudAccountCard

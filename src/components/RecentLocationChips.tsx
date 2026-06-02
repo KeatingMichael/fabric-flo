@@ -1,5 +1,6 @@
 import type { NamedLocation } from "@/types";
 import { LOCATION_KIND_LABEL } from "@/types";
+import { hapticSelection } from "@/lib/haptics";
 
 type Props = {
   locations: NamedLocation[];
@@ -28,7 +29,10 @@ export function RecentLocationChips({ locations, recentIds, selectedId, onPick }
               key={loc.id}
               type="button"
               className={`recent-loc-chip ${active ? "recent-loc-chip--active" : ""}`}
-              onClick={() => onPick(loc.id)}
+              onClick={() => {
+                hapticSelection();
+                onPick(loc.id);
+              }}
             >
               <span className="recent-loc-chip__name">{loc.name}</span>
               <span className="recent-loc-chip__kind">{LOCATION_KIND_LABEL[loc.kind]}</span>

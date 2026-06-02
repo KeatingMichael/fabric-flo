@@ -14,6 +14,11 @@ import App from "@/App";
 import { initNativeShell } from "@/lib/initNativeShell";
 import "@/styles/global.css";
 
+if ("scrollRestoration" in window.history) {
+  window.history.scrollRestoration = "manual";
+}
+window.scrollTo(0, 0);
+
 void initNativeShell();
 
 createRoot(document.getElementById("root")!).render(

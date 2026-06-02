@@ -10,6 +10,7 @@ import {
 } from "@/lib/recentLocations";
 import { readAssignNavState } from "@/lib/scanNavigation";
 import { resolveScan, SCAN_METHOD_LABEL } from "@/lib/scanResolve";
+import { hapticSuccess } from "@/lib/haptics";
 import type { InventoryItem, LocationKind } from "@/types";
 import { effectiveItemCondition, ITEM_CONDITION_LABEL, LOCATION_KIND_LABEL, LOCATION_KIND_ORDER } from "@/types";
 
@@ -138,6 +139,7 @@ export function AssignPage() {
     } else {
       linkUnknownScan(prod.id, raw, "fabric", unkName, locId);
     }
+    hapticSuccess();
     navigate("/log", {
       replace: true,
       state: {

@@ -11,6 +11,7 @@ import { getInventoryPieceLabel, inventoryNameOptionsForKind } from "@/lib/inven
 import { filterInventoryItems } from "@/lib/inventorySearch";
 import { isDynamicTrackingPayload } from "@/lib/qrPayload";
 import { openQrPrintSheet } from "@/lib/qrPrint";
+import { hapticSuccess } from "@/lib/haptics";
 import { formatLocalDateTime, lastScanForItem } from "@/lib/storage";
 import type { ItemCondition, Production } from "@/types";
 import { effectiveItemCondition, ITEM_CONDITION_LABEL } from "@/types";
@@ -90,6 +91,7 @@ export function InventoryPage() {
             rawQr: raw,
             scanMethod: "qr",
           });
+          hapticSuccess();
         }
       }
     } else if (nav.scanMethod === "label" || nav.scanMethod === "manual") {
@@ -153,6 +155,7 @@ export function InventoryPage() {
           scanMethod: "manual",
         });
       }
+      hapticSuccess();
       navigate("/log", {
         state: {
           flash: {

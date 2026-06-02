@@ -29,7 +29,7 @@ export function SyncStatusBanner() {
   async function onPullLatest() {
     if (
       !window.confirm(
-        "Replace everything on this device with the latest copy from the server? Unsynced changes on this device may be lost."
+        "Replace everything on this phone with the latest copy from the cloud? Unsaved changes on this phone may be lost."
       )
     ) {
       return;
@@ -67,15 +67,15 @@ export function SyncStatusBanner() {
 
   let message = "";
   if (showOffline) {
-    message = "Offline — scans and edits are saved on this device and will sync when you’re back online.";
+    message = "You’re offline. Scans save on this phone and upload when you’re back online.";
   } else if (suppressAutoPush) {
-    message = "Automatic sync is paused. Open Fabric Flo account to push manually or resume backup.";
+    message = "Automatic save is paused on this phone. Open Fabric Flo account to save manually.";
   } else if (showConflict) {
-    message = "Someone else updated this production on the server. Pull the latest copy or retry after reviewing.";
+    message = "This show was updated on another phone. Get the latest copy, or save this phone’s version again.";
   } else if (showSyncing) {
-    message = "Syncing with cloud…";
+    message = "Saving to the cloud…";
   } else if (showError) {
-    message = sync.lastError ?? "Sync issue";
+    message = sync.lastError ?? "Could not save online.";
   }
 
   return (
@@ -89,11 +89,11 @@ export function SyncStatusBanner() {
           <>
             {isNormalizedFabricFloBackend() ? (
               <button type="button" className="btn btn-primary" style={{ flex: 1 }} onClick={() => void onPullLatest()}>
-                Pull latest
+                Get latest copy
               </button>
             ) : null}
             <button type="button" className="btn btn-secondary" style={{ flex: 1 }} onClick={() => void onRetryPush()}>
-              Retry sync
+              Save again
             </button>
           </>
         ) : null}

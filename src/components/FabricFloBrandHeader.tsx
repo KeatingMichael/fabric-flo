@@ -20,12 +20,23 @@ export function FabricFloBrandHeader() {
   const homeTo = production ? "/dashboard" : pathname === "/" ? "/" : "/app";
   const [logoSrc, setLogoSrc] = useState(logoBundled || LOGO_PUBLIC);
 
+  function onHomeClick() {
+    if (pathname === homeTo) {
+      window.scrollTo(0, 0);
+    }
+  }
+
   return (
     <div className="app-brand-header-wrap">
       <header className="app-brand-header">
         <div className="app-brand-header__inner">
           <div className="app-brand-header__brand">
-            <Link to={homeTo} className="app-brand-header__logo-link" aria-label="Fabric Flo home">
+            <Link
+              to={homeTo}
+              className="app-brand-header__logo-link"
+              aria-label="Fabric Flo home"
+              onClick={onHomeClick}
+            >
               <img
                 className="app-brand-header__logo"
                 src={logoSrc}

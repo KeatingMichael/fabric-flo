@@ -5,12 +5,16 @@ import { useCloudAuth } from "@/context/CloudAuthProvider";
 import { clearLocalAppData } from "@/lib/clearLocalAppData";
 import { deleteAccountAndData } from "@/lib/accountDeletion";
 import { isNormalizedFabricFloBackend } from "@/lib/cloudRepository";
+import { getSupabase } from "@/lib/supabase";
 import { mailtoAccountDeletion, PRIVACY_EMAIL } from "@/lib/legalConfig";
 import { pushAppStateToCloud } from "@/lib/offlineSync";
 import { useSyncStatus } from "@/context/SyncStatusProvider";
 import { ProductionNameField } from "@/components/ProductionNameField";
+import { friendlyAuthError } from "@/lib/authMessages";
+import { hapticSuccess, hapticWarning } from "@/lib/haptics";
 
 type AccountStep = "email" | "password";
+type PasswordMode = "signin" | "signup";
 
 type Props = {
   productionName: string;
@@ -42,6 +46,7 @@ export function CloudAccountCard({
   const { mergeProductionVersions, replaceEntireAppData } = useApp();
   const sync = useSyncStatus();
   const [accountStep, setAccountStep] = useState<AccountStep>("email");
+  const [passwordMode, setPasswordMode] = useState<PasswordMode>("signup");
   const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
   const [agreedLegal, setAgreedLegal] = useState(false);
@@ -61,8 +66,9 @@ export function CloudAccountCard({
       if (productionVersions && Object.keys(productionVersions).length > 0) {
         mergeProductionVersions(productionVersions);
       }
-      setMsg(isNormalizedFabricFloBackend() ? "Saved to server." : "Saved to cloud.");
+      setMsg(isNormalizedFabricFloBackend() ? "Saved online." : "Saved to cloud.");
       sync.markSyncSuccess();
+      hapticSuccess();
     } catch (e) {
       const text = e instanceof Error ? e.message : "Sync failed";
       setMsg(text);
@@ -158,17 +164,20 @@ export function CloudAccountCard({
     setMsg(null);
     const { error } = await signIn(email, password);
     if (error) {
-      setMsg(error);
+      setMsg(friendlyAuthError(error));
+      hapticWarning();
       return;
     }
     if (onEnsureProduction) {
       const id = await onEnsureProduction();
       if (!id) {
         setMsg("Enter your production name to continue.");
+        hapticWarning();
         return;
       }
     }
     setPassword("");
+    hapticSuccess();
     goHome();
   }
 
@@ -195,10 +204,27 @@ export function CloudAccountCard({
     }
     setMsg(null);
     const { error } = await signUp(email, password);
-    setMsg(
-      error ??
-        "Check your email to confirm your account, then return here and tap Continue to sign in."
-    );
+    if (error) {
+      setMsg(friendlyAuthError(error));
+      return;
+    }
+    const session = (await getSupabase()?.auth.getSession())?.data.session;
+    if (session) {
+      if (onEnsureProduction) {
+        const id = await onEnsureProduction();
+        if (!id) {
+          setMsg("Enter your production name to continue.");
+          return;
+        }
+      }
+      setPassword("");
+      hapticSuccess();
+      goHome();
+      return;
+    }
+    setMsg("Account created. Check your email if asked to confirm, then choose Sign in.");
+    hapticSuccess();
+    setPasswordMode("signin");
   }
 
   async function onForgotPassword() {
@@ -281,26 +307,29 @@ export function CloudAccountCard({
           />
         ) : null}
         <button type="button" className="btn btn-primary btn-block" onClick={() => void onSignedInContinue()}>
-          Continue
+          Open my show
         </button>
         <details className="account-advanced">
           <summary className="muted" style={{ cursor: "pointer", fontSize: "0.88rem" }}>
-            Account options
+            Backup &amp; sign-out
           </summary>
           <div className="stack" style={{ marginTop: "0.65rem", gap: "0.5rem" }}>
+            <p className="muted" style={{ marginBottom: 0, fontSize: "0.82rem" }}>
+              Your show is saved online. You rarely need the options below.
+            </p>
             {sync.lastSyncedAt && !sync.lastError ? (
               <p className="muted" style={{ marginBottom: 0, fontSize: "0.85rem" }}>
-                Last synced: {new Date(sync.lastSyncedAt).toLocaleString()}
+                Last saved online: {new Date(sync.lastSyncedAt).toLocaleString()}
               </p>
             ) : null}
             {suppressAutoPush ? (
               <p className="muted" style={{ marginBottom: 0, fontSize: "0.85rem" }}>
-                Automatic sync is paused. You can still push manually.
+                Automatic save is paused on this device.
               </p>
             ) : null}
             <div className="row" style={{ width: "100%" }}>
               <button type="button" className="btn btn-secondary" style={{ flex: 1 }} onClick={() => void onPushNow()}>
-                Push now
+                Save now
               </button>
               {suppressAutoPush ? (
                 <button
@@ -309,24 +338,33 @@ export function CloudAccountCard({
                   style={{ flex: 1 }}
                   onClick={() => setSuppressAutoPush(false)}
                 >
-                  Resume sync
+                  Turn auto-save on
                 </button>
               ) : null}
               <button type="button" className="btn btn-secondary" style={{ flex: 1 }} onClick={() => void signOut()}>
                 Sign out
               </button>
             </div>
+            <p className="muted" style={{ marginBottom: 0, fontSize: "0.78rem" }}>
+              Save now — upload this phone&apos;s copy immediately. Sign out — log out here only; your online data stays.
+            </p>
             <button type="button" className="btn btn-secondary btn-block" onClick={onDeleteLocalData}>
-              Delete data on this device
+              Clear this phone only
             </button>
+            <p className="muted" style={{ marginBottom: 0, fontSize: "0.78rem" }}>
+              Removes Fabric Flo data from this device. Your online account and show are not deleted.
+            </p>
             <button
               type="button"
               className="btn btn-danger btn-block"
               disabled={deleting}
               onClick={() => void onDeleteAccount()}
             >
-              {deleting ? "Deleting…" : "Delete my account & cloud data"}
+              {deleting ? "Deleting…" : "Delete my account permanently"}
             </button>
+            <p className="muted" style={{ marginBottom: 0, fontSize: "0.78rem" }}>
+              Removes your account and cloud data. This cannot be undone.
+            </p>
             <a
               className="btn btn-ghost btn-block"
               style={{ textAlign: "center", textDecoration: "none", fontSize: "0.88rem" }}
@@ -378,35 +416,72 @@ export function CloudAccountCard({
           </button>
         </form>
         <p className="muted" style={{ marginBottom: 0, fontSize: "0.82rem" }}>
-          New here? You will create a password on the next screen. By continuing you agree to our{" "}
-          <Link to="/terms">Terms</Link> and <Link to="/privacy">Privacy Policy</Link>.
+          Step 1 of 2 — enter your email. On the next screen you will create a password or sign in.
         </p>
         {msg ? <p className="muted" style={{ marginBottom: 0 }}>{msg}</p> : null}
       </section>
     );
   }
 
+  async function onPasswordSubmit(e: FormEvent) {
+    e.preventDefault();
+    if (passwordMode === "signup") {
+      await onSignUp();
+    } else {
+      await onSignIn(e);
+    }
+  }
+
   return (
     <section className="card stack" id="cloud-account">
       <h2 style={{ marginTop: 0 }}>Fabric Flo account</h2>
       <p className="muted" style={{ marginBottom: 0 }}>
-        Welcome back, <strong>{email.trim()}</strong>
+        Step 2 of 2 — for <strong>{email.trim()}</strong>
         {productionName.trim() ? (
           <>
             {" "}
-            · <strong>{productionName.trim()}</strong>
+            · show: <strong>{productionName.trim()}</strong>
           </>
         ) : null}
       </p>
-      <form className="stack" onSubmit={onSignIn}>
+      <form className="stack" onSubmit={(e) => void onPasswordSubmit(e)}>
+        <fieldset className="stack" style={{ border: "none", margin: 0, padding: 0, gap: "0.35rem" }}>
+          <legend className="muted" style={{ fontSize: "0.85rem", marginBottom: "0.25rem" }}>
+            I am…
+          </legend>
+          <label className="legal-consent">
+            <input
+              type="radio"
+              name="password-mode"
+              checked={passwordMode === "signup"}
+              onChange={() => {
+                setPasswordMode("signup");
+                setMsg(null);
+              }}
+            />
+            <span>New — create my Fabric Flo account</span>
+          </label>
+          <label className="legal-consent">
+            <input
+              type="radio"
+              name="password-mode"
+              checked={passwordMode === "signin"}
+              onChange={() => {
+                setPasswordMode("signin");
+                setMsg(null);
+              }}
+            />
+            <span>Returning — I already have a password</span>
+          </label>
+        </fieldset>
         <div className="field">
           <label htmlFor="cloud-pass">Password</label>
           <input
             id="cloud-pass"
             className="input"
             type="password"
-            autoComplete="current-password"
-            placeholder="Your password"
+            autoComplete={passwordMode === "signup" ? "new-password" : "current-password"}
+            placeholder={passwordMode === "signup" ? "Choose a password" : "Your password"}
             value={password}
             onChange={(e) => setPassword(e.target.value)}
           />
@@ -427,11 +502,13 @@ export function CloudAccountCard({
           className="btn btn-primary btn-block"
           disabled={!password || !agreedLegal}
         >
-          Continue
+          {passwordMode === "signup" ? "Create my account" : "Sign in"}
         </button>
-        <button type="button" className="btn btn-ghost btn-block" onClick={() => void onForgotPassword()}>
-          Forgot password
-        </button>
+        {passwordMode === "signin" ? (
+          <button type="button" className="btn btn-ghost btn-block" onClick={() => void onForgotPassword()}>
+            Forgot password
+          </button>
+        ) : null}
         <button
           type="button"
           className="btn btn-secondary btn-block"
@@ -442,14 +519,6 @@ export function CloudAccountCard({
           }}
         >
           Use a different email
-        </button>
-        <button
-          type="button"
-          className="btn btn-secondary btn-block"
-          disabled={!password || !agreedLegal}
-          onClick={() => void onSignUp()}
-        >
-          Create new account
         </button>
       </form>
       {msg ? <p className="muted" style={{ marginBottom: 0 }}>{msg}</p> : null}

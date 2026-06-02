@@ -3,6 +3,7 @@ import { Link, useLocation, useNavigate } from "react-router-dom";
 import type { Html5Qrcode } from "html5-qrcode";
 import { LabelCameraCapture } from "@/components/LabelCameraCapture";
 import { isNativeApp } from "@/lib/native";
+import { hapticLight, hapticSuccess } from "@/lib/haptics";
 import { readScanNavState } from "@/lib/scanNavigation";
 import type { ScanMethod } from "@/types";
 
@@ -25,6 +26,7 @@ export function ScanPage() {
   function goFabrics(raw: string, scanMethod: ScanMethod) {
     const t = raw.trim();
     if (!t) return;
+    hapticLight();
     navigate("/inventory", {
       state: {
         raw: t,
@@ -59,6 +61,7 @@ export function ScanPage() {
     const onOk = (text: string, scanner: Html5Qrcode) => {
       if (handledRef.current) return;
       handledRef.current = true;
+      hapticSuccess();
       void scanner
         .stop()
         .then(() => scanner.clear())

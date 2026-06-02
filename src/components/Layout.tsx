@@ -4,6 +4,7 @@ import { FabricFloBrandHeader } from "@/components/FabricFloBrandHeader";
 import { LegalFooter } from "@/components/LegalFooter";
 import { SyncStatusBanner } from "@/components/SyncStatusBanner";
 import { useActiveProduction } from "@/context/AppStore";
+import { hapticSelection } from "@/lib/haptics";
 
 const nav = [
   { to: "/dashboard", label: "Home", icon: "⌂" },
@@ -64,6 +65,7 @@ function BottomNav({ pathname }: { pathname: string }) {
             <Link
               key={item.to}
               to={item.to}
+              onClick={() => hapticSelection()}
               style={{
                 flex: 1,
                 textAlign: "center",

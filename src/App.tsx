@@ -2,6 +2,7 @@ import type { ReactNode } from "react";
 import { Routes, Route, Navigate } from "react-router-dom";
 import { useActiveProduction } from "@/context/AppStore";
 import { Layout } from "@/components/Layout";
+import { ScrollToTop } from "@/components/ScrollToTop";
 import { HomePage } from "@/pages/HomePage";
 import { MarketingPage } from "@/pages/MarketingPage";
 import { DashboardPage } from "@/pages/DashboardPage";
@@ -25,6 +26,7 @@ function RequireProduction({ children }: { children: ReactNode }) {
 export default function App() {
   return (
     <Layout>
+      <ScrollToTop />
       <Routes>
         <Route path="/" element={<MarketingPage />} />
         <Route path="/app" element={<HomePage />} />
