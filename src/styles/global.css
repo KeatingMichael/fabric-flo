@@ -27,30 +27,42 @@
 
 html {
   scroll-behavior: auto;
-  scroll-padding-top: calc(5.5rem + var(--safe-top));
 }
 
 html,
 body {
   margin: 0;
-  min-height: 100%;
+  height: 100%;
   background: var(--bg);
   color: var(--text);
   font-family: var(--font);
   font-size: 17px;
   line-height: 1.45;
   -webkit-tap-highlight-color: transparent;
-  overflow-x: clip;
+  overflow: hidden;
 }
 
 #root {
+  height: 100%;
   min-height: 100dvh;
 }
 
 .app-shell {
+  height: 100%;
   min-height: 100dvh;
   display: flex;
   flex-direction: column;
+  overflow: hidden;
+}
+
+.app-main {
+  flex: 1;
+  min-height: 0;
+  overflow-x: hidden;
+  overflow-y: auto;
+  -webkit-overflow-scrolling: touch;
+  overscroll-behavior-y: contain;
+  scroll-padding-top: 0.5rem;
 }
 
 a {
@@ -107,7 +119,7 @@ p {
 }
 
 .page {
-  padding: 1rem 1rem calc(5.5rem + var(--safe-bottom));
+  padding: 1rem;
   max-width: 560px;
   margin: 0 auto;
 }
@@ -306,13 +318,10 @@ p {
 }
 
 .app-brand-header-wrap {
-  position: sticky;
-  top: 0;
-  z-index: 20;
+  flex-shrink: 0;
   width: 100%;
   border-bottom: 1px solid var(--border);
-  background: rgba(11, 18, 32, 0.94);
-  backdrop-filter: blur(10px);
+  background: var(--bg);
 }
 
 .app-brand-header {
@@ -674,7 +683,63 @@ p {
 }
 
 #cloud-account {
-  scroll-margin-top: calc(5.5rem + var(--safe-top));
+  scroll-margin-top: 0.75rem;
+}
+
+.app-bottom-nav {
+  flex-shrink: 0;
+  padding-bottom: calc(0.5rem + var(--safe-bottom));
+  padding-top: 0.35rem;
+  background: var(--bg);
+  border-top: 1px solid var(--border);
+}
+
+.app-bottom-nav__inner {
+  display: flex;
+  justify-content: space-around;
+  align-items: stretch;
+  max-width: 560px;
+  margin: 0 auto;
+}
+
+.app-bottom-nav__link {
+  flex: 1;
+  text-align: center;
+  text-decoration: none;
+  color: var(--muted);
+  font-size: 0.72rem;
+  font-weight: 600;
+  padding: 0.35rem 0.2rem;
+}
+
+.app-bottom-nav__link--active {
+  color: var(--accent);
+}
+
+.app-bottom-nav__icon {
+  display: block;
+  font-size: 1.25rem;
+  line-height: 1.1;
+}
+
+.inventory-item-expand > summary {
+  cursor: pointer;
+  color: var(--accent);
+  font-size: 0.88rem;
+  font-weight: 600;
+  list-style: none;
+}
+
+.inventory-item-expand > summary::-webkit-details-marker {
+  display: none;
+}
+
+.inventory-item-expand > summary::before {
+  content: "▸ ";
+}
+
+.inventory-item-expand[open] > summary::before {
+  content: "▾ ";
 }
 
 /* Public marketing site (/) */

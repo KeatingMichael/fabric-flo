@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState, type FormEvent } from "react";
+import { useEffect, useMemo, useRef, useState, type FormEvent } from "react";
 import { Link, useLocation, useNavigate } from "react-router-dom";
 import { useActiveProduction, useApp } from "@/context/AppStore";
 import { readInventoryNavState } from "@/lib/scanNavigation";
@@ -56,11 +56,22 @@ export function InventoryPage() {
     [production, searchQuery]
   );
 
+  const handledScanRef = useRef<string | null>(null);
+
   useEffect(() => {
     if (!production) return;
     const nav = readInventoryNavState(location.state);
     const raw = nav.raw?.trim();
-    if (!raw) return;
+    if (!raw) {
+      handledScanRef.current = null;
+      return;
+    }
+
+    const scanKey = `${raw}\0${nav.scanMethod ?? ""}\0${nav.lockedLocationId ?? ""}`;
+    if (handledScanRef.current === scanKey) return;
+    handledScanRef.current = scanKey;
+
+    navigate(location.pathname, { replace: true, state: {} });
 
     const resolved = resolveScan(production, raw, nav.scanMethod);
     if (resolved.item) {
@@ -97,9 +108,7 @@ export function InventoryPage() {
     } else if (nav.scanMethod === "label" || nav.scanMethod === "manual") {
       setVendorToken(raw);
     }
-
-    navigate(location.pathname, { replace: true, state: {} });
-  }, [location.state, location.pathname, navigate, production]);
+  }, [location.state, location.pathname, navigate, production, scanLog, logScan]);
 
   if (!production) return null;
   const prod = production;
@@ -374,8 +383,13 @@ export function InventoryPage() {
                     "Not scanned yet"
                   )}
                 </div>
-                <ItemLabelMarks productionId={prod.id} item={item} />
-                <ItemQrCodes productionId={prod.id} item={item} pieceLabel={pieceLabel} />
+                <details className="inventory-item-expand">
+                  <summary>QR codes &amp; sticker IDs</summary>
+                  <div className="stack" style={{ marginTop: "0.65rem", gap: "0.75rem" }}>
+                    <ItemLabelMarks productionId={prod.id} item={item} />
+                    <ItemQrCodes productionId={prod.id} item={item} pieceLabel={pieceLabel} />
+                  </div>
+                </details>
               </article>
             );
           })
