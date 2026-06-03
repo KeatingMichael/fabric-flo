@@ -1,11 +1,5 @@
-import {
-  createContext,
-  useCallback,
-  useContext,
-  useRef,
-  type ReactNode,
-  type RefObject,
-} from "react";
+import { createContext, useCallback, useContext, useRef, type ReactNode, type RefObject } from "react";
+import { resetScrollPosition } from "@/lib/scrollReset";
 
 type ScrollContainerContextValue = {
   mainRef: RefObject<HTMLElement>;
@@ -19,13 +13,14 @@ export function ScrollContainerProvider({ children }: { children: ReactNode }) {
 
   const scrollToTop = useCallback((behavior: ScrollBehavior = "auto") => {
     const el = mainRef.current;
-    if (el) {
-      el.scrollTo({ top: 0, left: 0, behavior });
+    if (behavior === "auto") {
+      resetScrollPosition(el);
       return;
     }
+    if (el) {
+      el.scrollTo({ top: 0, left: 0, behavior });
+    }
     window.scrollTo({ top: 0, left: 0, behavior });
-    document.documentElement.scrollTop = 0;
-    document.body.scrollTop = 0;
   }, []);
 
   return (

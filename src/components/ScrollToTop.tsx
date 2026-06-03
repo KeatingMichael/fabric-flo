@@ -1,33 +1,34 @@
-import { useEffect } from "react";
+import { useLayoutEffect } from "react";
 import { useLocation } from "react-router-dom";
 import { useScrollContainer } from "@/context/ScrollContainerContext";
+import { resetScrollAfterPaint } from "@/lib/scrollReset";
 
-/** Scroll the app main pane to top on route change (iOS-safe; avoids window scroll restore glitches). */
+/** Scroll the app main pane to top before paint on every navigation. */
 export function ScrollToTop() {
-  const { pathname, hash } = useLocation();
-  const { scrollToTop } = useScrollContainer();
+  const { pathname, hash, key } = useLocation();
+  const { mainRef } = useScrollContainer();
 
-  useEffect(() => {
+  useLayoutEffect(() => {
     if ("scrollRestoration" in window.history) {
       window.history.scrollRestoration = "manual";
     }
-  }, []);
+    const onPopState = () => resetScrollAfterPaint(mainRef.current);
+    window.addEventListener("popstate", onPopState);
+    return () => window.removeEventListener("popstate", onPopState);
+  }, [mainRef]);
 
-  useEffect(() => {
+  useLayoutEffect(() => {
+    const root = mainRef.current;
     if (hash) {
       const target = document.getElementById(hash.slice(1));
       if (target) {
-        requestAnimationFrame(() => {
-          target.scrollIntoView({ block: "start", behavior: "auto" });
-        });
+        resetScrollAfterPaint(root);
+        target.scrollIntoView({ block: "start", behavior: "auto" });
         return;
       }
     }
-
-    scrollToTop("auto");
-    const t = window.setTimeout(() => scrollToTop("auto"), 0);
-    return () => window.clearTimeout(t);
-  }, [pathname, hash, scrollToTop]);
+    resetScrollAfterPaint(root);
+  }, [pathname, hash, key, mainRef]);
 
   return null;
 }

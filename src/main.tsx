@@ -12,9 +12,17 @@ import {
 import { SyncStatusProvider } from "@/context/SyncStatusProvider";
 import App from "@/App";
 import { initNativeShell } from "@/lib/initNativeShell";
+import { resetScrollPosition } from "@/lib/scrollReset";
 import "@/styles/global.css";
 
 void initNativeShell();
+
+if (typeof window !== "undefined") {
+  if ("scrollRestoration" in window.history) {
+    window.history.scrollRestoration = "manual";
+  }
+  resetScrollPosition();
+}
 
 createRoot(document.getElementById("root")!).render(
   <StrictMode>

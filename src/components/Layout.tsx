@@ -1,7 +1,8 @@
 import type { ReactNode } from "react";
-import { Link, useLocation } from "react-router-dom";
+import { useLocation } from "react-router-dom";
 import { FabricFloBrandHeader } from "@/components/FabricFloBrandHeader";
 import { LegalFooter } from "@/components/LegalFooter";
+import { ScrollLink } from "@/components/ScrollLink";
 import { SyncStatusBanner } from "@/components/SyncStatusBanner";
 import { useActiveProduction } from "@/context/AppStore";
 import { ScrollContainerProvider, useScrollContainer } from "@/context/ScrollContainerContext";
@@ -26,7 +27,7 @@ export function Layout({ children }: { children: ReactNode }) {
 function LayoutShell({ children }: { children: ReactNode }) {
   const location = useLocation();
   const production = useActiveProduction();
-  const { mainRef } = useScrollContainer();
+  const { mainRef, scrollToTop } = useScrollContainer();
   const noNavPaths = ["/", "/app", "/help", "/privacy", "/terms", "/launch", "/licenses"];
   const showNav =
     production && !noNavPaths.includes(location.pathname) && location.pathname !== "/assign";
@@ -37,32 +38,37 @@ function LayoutShell({ children }: { children: ReactNode }) {
       <FabricFloBrandHeader />
       <SyncStatusBanner />
       <main ref={mainRef} className="app-main">
-        {children}
+        <div className="route-outlet" key={location.pathname}>
+          {children}
+        </div>
         {showLegalFooter ? <LegalFooter /> : null}
       </main>
-      {showNav ? <BottomNav pathname={location.pathname} /> : null}
+      {showNav ? <BottomNav pathname={location.pathname} onNavigate={scrollToTop} /> : null}
     </div>
   );
 }
 
-function BottomNav({ pathname }: { pathname: string }) {
+function BottomNav({ pathname, onNavigate }: { pathname: string; onNavigate: () => void }) {
   return (
     <nav className="app-bottom-nav" aria-label="Main">
       <div className="app-bottom-nav__inner">
         {nav.map((item) => {
           const active = pathname === item.to || pathname.startsWith(item.to + "/");
           return (
-            <Link
+            <ScrollLink
               key={item.to}
               to={item.to}
               className={`app-bottom-nav__link${active ? " app-bottom-nav__link--active" : ""}`}
-              onClick={() => hapticSelection()}
+              onClick={() => {
+                onNavigate();
+                hapticSelection();
+              }}
             >
               <span className="app-bottom-nav__icon" aria-hidden>
                 {item.icon}
               </span>
               {item.label}
-            </Link>
+            </ScrollLink>
           );
         })}
       </div>

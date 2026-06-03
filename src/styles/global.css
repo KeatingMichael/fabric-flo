@@ -63,6 +63,11 @@ body {
   -webkit-overflow-scrolling: touch;
   overscroll-behavior-y: contain;
   scroll-padding-top: 0.5rem;
+  touch-action: pan-y;
+}
+
+.route-outlet {
+  min-height: 0;
 }
 
 a {
