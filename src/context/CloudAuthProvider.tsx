@@ -158,15 +158,20 @@ export function CloudSessionBootstrap() {
           const hasCloud = cloud.productions.length > 0 || cloud.scanLog.length > 0;
 
           if (hasCloud) {
-            const ok = window.confirm(
-              "Your Fabric Flo cloud data has productions or scans. Replace everything stored ON THIS DEVICE with that server copy? (Cancel keeps this device; automatic cloud sync will pause until you turn it back on.)"
-            );
-            if (cancelled) return;
-            if (ok) {
+            if (!hasLocal) {
               replaceRef.current(cloud);
               setSuppressAutoPush(false);
             } else {
-              setSuppressAutoPush(true);
+              const ok = window.confirm(
+                "This phone already has show data, and your account also has a copy online.\n\nOK — use the online copy (replaces what's on this phone).\nCancel — keep this phone's copy (automatic online save pauses until you turn it back on)."
+              );
+              if (cancelled) return;
+              if (ok) {
+                replaceRef.current(cloud);
+                setSuppressAutoPush(false);
+              } else {
+                setSuppressAutoPush(true);
+              }
             }
           } else if (hasLocal) {
             window.alert(
@@ -181,15 +186,20 @@ export function CloudSessionBootstrap() {
         const hasCloud = cloud && (cloud.productions.length > 0 || cloud.scanLog.length > 0);
 
         if (hasCloud) {
-          const ok = window.confirm(
-            "Your Fabric Flo cloud backup has data. Replace everything stored ON THIS DEVICE with that backup? (Cancel keeps this device; automatic cloud backup will pause until you turn it back on.)"
-          );
-          if (cancelled) return;
-          if (ok) {
+          if (!hasLocal) {
             replaceRef.current(cloud!);
             setSuppressAutoPush(false);
           } else {
-            setSuppressAutoPush(true);
+            const ok = window.confirm(
+              "This phone already has show data, and your account also has a backup online.\n\nOK — use the online backup (replaces what's on this phone).\nCancel — keep this phone's copy (automatic online save pauses until you turn it back on)."
+            );
+            if (cancelled) return;
+            if (ok) {
+              replaceRef.current(cloud!);
+              setSuppressAutoPush(false);
+            } else {
+              setSuppressAutoPush(true);
+            }
           }
         } else if (hasLocal) {
           await upsertUserAppState(uid, snap);
