@@ -1,6 +1,7 @@
 import { useState, type FormEvent } from "react";
 import { QuickLocationPresets } from "@/components/BulkLocationAdd";
 import { useActiveProduction, useApp } from "@/context/AppStore";
+import { rememberRecentLocation } from "@/lib/recentLocations";
 import type { LocationKind } from "@/types";
 import { LOCATION_KIND_LABEL, LOCATION_KIND_ORDER } from "@/types";
 
@@ -16,7 +17,8 @@ export function LocationsPage() {
   function onAdd(e: FormEvent) {
     e.preventDefault();
     if (!name.trim()) return;
-    addLocation(prod.id, kind, name.trim());
+    const id = addLocation(prod.id, kind, name.trim());
+    rememberRecentLocation(prod.id, id);
     setName("");
   }
 

@@ -1182,6 +1182,35 @@ function pickBestAttempt(attempts: OcrAttempt[]): string {
   return scoreLabelText(structured) > scoreLabelText(best) ? structured : best;
 }
 
+const SCAN_CLOUD_MAX_EDGE = 1600;
+
+export type LabelScanOutcome = {
+  fields: LabelOcrFields;
+  status: import("@/lib/labelOcrCloud").LabelOcrCloudStatus;
+  message: string;
+};
+
+/** Fast cloud-only label read for Scan — no phone-side Tesseract (too slow on set). */
+export async function scanLabelFromCapture(
+  source: HTMLCanvasElement,
+  jpegDataUrl?: string
+): Promise<LabelScanOutcome> {
+  const canvas = autoCropLabelRegion(source);
+  const ocrCanvas = preprocessLabelContrast(scaleCanvas(canvas, SCAN_CLOUD_MAX_EDGE));
+  const cloudDataUrl = shrinkJpegForCloud(
+    ocrCanvas,
+    jpegDataUrl ?? ocrCanvas.toDataURL("image/jpeg", 0.88)
+  );
+  const { recognizeLabelFieldsCloudWithStatus, labelScanStatusMessage } = await import(
+    "@/lib/labelOcrCloud"
+  );
+  const outcome = await recognizeLabelFieldsCloudWithStatus(cloudDataUrl);
+  return {
+    ...outcome,
+    message: labelScanStatusMessage(outcome.status, outcome.fields),
+  };
+}
+
 /** Run OCR on a captured label photo; returns the three sticker lines separately. */
 export async function recognizeLabelFieldsFromImage(
   source: HTMLCanvasElement | HTMLImageElement | string,
@@ -1196,42 +1225,8 @@ export async function recognizeLabelFieldsFromImage(
   } else {
     canvas = source;
   }
-
-  canvas = autoCropLabelRegion(canvas);
-  const ocrCanvas = preprocessLabelContrast(scaleCanvas(canvas, 3200));
-  const dataUrl = jpegDataUrl ?? ocrCanvas.toDataURL("image/jpeg", 0.95);
-
-  const cloudDataUrl = shrinkJpegForCloud(ocrCanvas, dataUrl);
-
-  if (typeof navigator !== "undefined" && navigator.onLine) {
-    const { recognizeLabelFieldsCloud } = await import("@/lib/labelOcrCloud");
-    const cloud = await recognizeLabelFieldsCloud(cloudDataUrl);
-    if (cloud && (cloud.job || cloud.fabric || cloud.size)) {
-      if (!labelFieldsNeedLocalFallback(cloud)) {
-        return cloud;
-      }
-      const local = await recognizeLabelFieldsLocal(canvas);
-      const merged = mergeLabelFieldResults(cloud, local);
-      if (scoreParsedLabelFields(merged) >= scoreParsedLabelFields(cloud)) {
-        return merged;
-      }
-      if (looksLikeWeakJobLine(cloud.job)) {
-        const localDigits = local.job.replace(/\D/g, "");
-        if (isPlausibleJobDigits(localDigits)) cloud.job = localDigits;
-      }
-      if (looksLikeWeakSizeLine(cloud.size) && !looksLikeWeakSizeLine(local.size)) {
-        cloud.size = local.size;
-      }
-      if (
-        scoreFabricCandidate(local.fabric) > scoreFabricCandidate(cloud.fabric) + 10
-      ) {
-        cloud.fabric = local.fabric;
-      }
-      return cloud;
-    }
-  }
-
-  return recognizeLabelFieldsLocal(canvas);
+  const outcome = await scanLabelFromCapture(canvas, jpegDataUrl);
+  return outcome.fields;
 }
 
 /** Keep cloud OCR images under OCR.space free-tier size limit (~1 MB). */
@@ -1248,7 +1243,8 @@ function shrinkJpegForCloud(canvas: HTMLCanvasElement, preferred?: string): stri
   return canvas.toDataURL("image/jpeg", 0.5);
 }
 
-async function recognizeLabelFieldsLocal(canvas: HTMLCanvasElement): Promise<LabelOcrFields> {
+/** Deep offline OCR — not used on the Scan hot path (too slow on phones). */
+export async function recognizeLabelFieldsLocalHeavy(canvas: HTMLCanvasElement): Promise<LabelOcrFields> {
   const variants = buildLabelVariants(canvas);
   const worker = await createWorker("eng", 1, { logger: () => {} });
   const attempts: OcrAttempt[] = [];
@@ -1356,26 +1352,6 @@ function scoreParsedLabelFields(fields: LabelOcrFields): number {
   if (fields.size.includes("/")) score -= 50;
 
   return score;
-}
-
-function labelFieldsNeedLocalFallback(fields: LabelOcrFields): boolean {
-  return (
-    scoreParsedLabelFields(fields) < 75 ||
-    looksLikeWeakJobLine(fields.job) ||
-    looksLikeWeakSizeLine(fields.size) ||
-    looksLikeWeakFabricLine(fields.fabric)
-  );
-}
-
-function mergeLabelFieldResults(primary: LabelOcrFields, secondary: LabelOcrFields): LabelOcrFields {
-  const context = [primary.job, primary.fabric, primary.size, secondary.job, secondary.fabric, secondary.size].join(
-    "\n"
-  );
-  return {
-    job: pickBestJobFromCandidates([primary.job, secondary.job], context),
-    fabric: pickBestFabricFromCandidates([primary.fabric, secondary.fabric]),
-    size: pickBestSizeFromCandidates([primary.size, secondary.size], context),
-  };
 }
 
 /** Pull job, fabric, and size from noisy OCR regardless of line breaks. */

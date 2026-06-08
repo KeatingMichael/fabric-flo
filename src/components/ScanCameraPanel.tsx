@@ -1,7 +1,12 @@
 import { useEffect, useRef, useState } from "react";
 import { playCameraShutter } from "@/lib/cameraFeedback";
 import { hapticCameraCapture, hapticSuccess } from "@/lib/haptics";
-import { cropVideoFrameToGuide, recognizeLabelFieldsFromImage, type LabelOcrFields } from "@/lib/labelOcr";
+import {
+  cropVideoFrameToGuide,
+  scanLabelFromCapture,
+  type LabelOcrFields,
+  type LabelScanOutcome,
+} from "@/lib/labelOcr";
 import { captureVideoFrame, decodeQrFromCanvas } from "@/lib/scanQrFromImage";
 
 type ScanMode = "qr" | "label";
@@ -11,6 +16,7 @@ type Props = {
   onQrDecoded: (text: string) => void;
   onLabelText?: (text: string) => void;
   onLabelFields?: (fields: LabelOcrFields) => void;
+  onLabelScan?: (outcome: LabelScanOutcome) => void;
   onError?: (message: string | null) => void;
 };
 
@@ -21,10 +27,18 @@ function triggerCaptureFeedback(setFlash: (on: boolean) => void): void {
   window.setTimeout(() => setFlash(false), 120);
 }
 
-export function ScanCameraPanel({ mode, onQrDecoded, onLabelText, onLabelFields, onError }: Props) {
+export function ScanCameraPanel({
+  mode,
+  onQrDecoded,
+  onLabelText,
+  onLabelFields,
+  onLabelScan,
+  onError,
+}: Props) {
   const videoRef = useRef<HTMLVideoElement>(null);
   const [ready, setReady] = useState(false);
   const [busy, setBusy] = useState(false);
+  const [readBanner, setReadBanner] = useState<{ message: string; ok: boolean } | null>(null);
   const [preview, setPreview] = useState<string | null>(null);
   const [flash, setFlash] = useState(false);
 
@@ -33,6 +47,7 @@ export function ScanCameraPanel({ mode, onQrDecoded, onLabelText, onLabelFields,
     let cancelled = false;
     setReady(false);
     setPreview(null);
+    setReadBanner(null);
     onError?.(null);
 
     void (async () => {
@@ -73,11 +88,12 @@ export function ScanCameraPanel({ mode, onQrDecoded, onLabelText, onLabelFields,
     triggerCaptureFeedback(setFlash);
     setBusy(true);
     setPreview(null);
+    setReadBanner(null);
     onError?.(null);
 
     try {
       const canvas = mode === "label" ? cropVideoFrameToGuide(video) : await captureVideoFrame(video);
-      const jpegDataUrl = canvas.toDataURL("image/jpeg", 0.97);
+      const jpegDataUrl = canvas.toDataURL("image/jpeg", 0.88);
       setPreview(jpegDataUrl);
 
       if (mode === "qr") {
@@ -91,16 +107,26 @@ export function ScanCameraPanel({ mode, onQrDecoded, onLabelText, onLabelFields,
         return;
       }
 
-      const fields = await recognizeLabelFieldsFromImage(canvas, jpegDataUrl);
-      if (!fields.job && !fields.fabric && !fields.size) {
-        onError?.("No text detected — fill the frame with the white label, add light, or type below.");
-        return;
+      setReadBanner({ message: "Sending label…", ok: false });
+      const outcome = await scanLabelFromCapture(canvas, jpegDataUrl);
+      const hasFields = Boolean(outcome.fields.job || outcome.fields.fabric || outcome.fields.size);
+      const ok = outcome.status === "success" || outcome.status === "partial";
+
+      setReadBanner({ message: outcome.message, ok });
+
+      if (hasFields) {
+        hapticSuccess();
+        onLabelFields?.(outcome.fields);
+        onLabelText?.([outcome.fields.job, outcome.fields.fabric, outcome.fields.size].filter(Boolean).join(" / "));
+        onLabelScan?.(outcome);
+        onError?.(ok ? null : outcome.message);
+      } else {
+        onError?.(outcome.message);
       }
-      hapticSuccess();
-      onLabelFields?.(fields);
-      onLabelText?.([fields.job, fields.fabric, fields.size].filter(Boolean).join(" / "));
     } catch (e) {
-      onError?.(e instanceof Error ? e.message : "Could not read scan.");
+      const message = e instanceof Error ? e.message : "Could not read scan.";
+      setReadBanner({ message, ok: false });
+      onError?.(message);
     } finally {
       setBusy(false);
     }
@@ -125,6 +151,11 @@ export function ScanCameraPanel({ mode, onQrDecoded, onLabelText, onLabelFields,
         {!ready ? (
           <div className="scan-viewfinder__loading muted">Starting camera…</div>
         ) : null}
+        {busy ? (
+          <div className="scan-viewfinder__reading muted" role="status">
+            Reading label…
+          </div>
+        ) : null}
         <button
           type="button"
           className="btn btn-primary scan-viewfinder__scan-btn"
@@ -139,6 +170,14 @@ export function ScanCameraPanel({ mode, onQrDecoded, onLabelText, onLabelFields,
         </button>
       </div>
       <p className="muted scan-camera__hint">{hint}</p>
+      {readBanner ? (
+        <div
+          className={`scan-read-banner${readBanner.ok ? " scan-read-banner--ok" : " scan-read-banner--warn"}`}
+          role="status"
+        >
+          {readBanner.message}
+        </div>
+      ) : null}
       {preview ? (
         <img
           src={preview}

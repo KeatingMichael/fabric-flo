@@ -43,7 +43,7 @@ export function ScanPage() {
   const navigate = useNavigate();
   const location = useLocation();
   const production = useActiveProduction();
-  const { logScan, linkUnknownScan, rememberHandwrittenMark } = useApp();
+  const { logScan, linkUnknownScan, rememberHandwrittenMark, addLocation } = useApp();
   const scanNav = readScanNavState(location.state);
   const lockedLocationId = scanNav.lockedLocationId;
   const lockedLocationLabel = scanNav.lockedLocationLabel;
@@ -51,6 +51,7 @@ export function ScanPage() {
   const fabricInputRef = useRef<HTMLInputElement>(null);
   const sizeInputRef = useRef<HTMLInputElement>(null);
   const focusFieldAfterScan = useRef<"job" | "fabric" | "size" | null>(null);
+  const readSectionRef = useRef<HTMLElement>(null);
 
   const [mode, setMode] = useState<ScanMode>("label");
   const [error, setError] = useState<string | null>(null);
@@ -59,6 +60,8 @@ export function ScanPage() {
   const [labelFabric, setLabelFabric] = useState("");
   const [labelSize, setLabelSize] = useState("");
   const [locId, setLocId] = useState("");
+  const [quickLocKind, setQuickLocKind] = useState<LocationKind>("filming_location");
+  const [quickLocName, setQuickLocName] = useState("");
   const [locationUnlocked, setLocationUnlocked] = useState(false);
   const [savedFlash, setSavedFlash] = useState<{ itemName: string; locationLabel: string } | null>(
     null
@@ -80,16 +83,34 @@ export function ScanPage() {
   );
 
   useEffect(() => {
-    if (!production) return;
+    if (!production || production.locations.length === 0) return;
     if (isLocationLocked && lockedLocationId) {
       setLocId(lockedLocationId);
       return;
     }
-    const last = getLastLocationId(production.id);
-    if (last && production.locations.some((l) => l.id === last)) {
-      setLocId(last);
-    }
-  }, [production, isLocationLocked, lockedLocationId]);
+    setLocId((current) => {
+      if (current && production.locations.some((l) => l.id === current)) return current;
+      const last = getLastLocationId(production.id);
+      if (last && production.locations.some((l) => l.id === last)) return last;
+      return production.locations[0]!.id;
+    });
+  }, [production, production?.locations, isLocationLocked, lockedLocationId]);
+
+  function saveQuickPlace() {
+    if (!production || !quickLocName.trim()) return;
+    const id = addLocation(production.id, quickLocKind, quickLocName.trim());
+    rememberRecentLocation(production.id, id);
+    setLocId(id);
+    setQuickLocName("");
+    setError(null);
+  }
+
+  function addToLogBlockReason(hasPlaces: boolean): string | null {
+    if (!hasPlaces) return "Add a place first — clearing Safari data removes places saved only on this phone.";
+    if (!locId) return "Choose where this scan goes.";
+    if (!scanText) return "Tap SCAN or type the label fields above.";
+    return null;
+  }
 
   function groupedLocs(kind: LocationKind) {
     return production?.locations.filter((l) => l.kind === kind) ?? [];
@@ -209,6 +230,7 @@ export function ScanPage() {
 
   const hasPlaces = production.locations.length > 0;
   const canAddToLog = Boolean(scanText && locId && hasPlaces);
+  const addToLogHint = addToLogBlockReason(hasPlaces);
 
   return (
     <div className="page stack">
@@ -300,13 +322,20 @@ export function ScanPage() {
         mode={mode}
         onQrDecoded={onQrDecoded}
         onLabelFields={(fields) => {
-          setError(null);
           setLabelJob(fields.job);
           setLabelFabric(fields.fabric);
           setLabelSize(fields.size);
           if (looksLikeWeakJobLine(fields.job)) focusFieldAfterScan.current = "job";
           else if (looksLikeWeakFabricLine(fields.fabric)) focusFieldAfterScan.current = "fabric";
           else if (looksLikeWeakSizeLine(fields.size)) focusFieldAfterScan.current = "size";
+        }}
+        onLabelScan={(outcome) => {
+          if (outcome.status === "success" || outcome.status === "partial") {
+            setError(null);
+          }
+          window.requestAnimationFrame(() => {
+            readSectionRef.current?.scrollIntoView({ behavior: "smooth", block: "nearest" });
+          });
         }}
         onError={setError}
       />
@@ -318,7 +347,7 @@ export function ScanPage() {
         </div>
       ) : null}
 
-      <section className="card stack">
+      <section ref={readSectionRef} className="card stack">
         <h2 style={{ marginTop: 0 }}>
           {mode === "qr" ? "Paste QR value" : "What we read"}
         </h2>
@@ -328,13 +357,47 @@ export function ScanPage() {
             : "Fix anything the camera missed, then Add to Log to save and scan the next piece."}
         </p>
         {!hasPlaces ? (
-          <div className="card" style={{ borderColor: "rgba(251,191,36,0.35)" }}>
+          <div className="card stack" style={{ borderColor: "rgba(251,191,36,0.35)" }}>
             <strong style={{ color: "var(--warning)" }}>Add a place first</strong>
             <p style={{ marginBottom: 0 }}>
-              Create at least one studio, filming location, or truck before logging scans.
+              Every scan needs a studio, filming location, or truck. After clearing Safari data you may need to
+              add places again — they sync online once saved.
             </p>
-            <Link to="/locations" className="btn btn-secondary btn-block" style={{ marginTop: "0.75rem" }}>
-              Set up places
+            <div className="field">
+              <label htmlFor="scan-quick-loc-kind">Type</label>
+              <select
+                id="scan-quick-loc-kind"
+                className="select"
+                value={quickLocKind}
+                onChange={(e) => setQuickLocKind(e.target.value as LocationKind)}
+              >
+                {LOCATION_KIND_ORDER.map((kind) => (
+                  <option key={kind} value={kind}>
+                    {LOCATION_KIND_LABEL[kind]}
+                  </option>
+                ))}
+              </select>
+            </div>
+            <div className="field">
+              <label htmlFor="scan-quick-loc-name">Place name</label>
+              <input
+                id="scan-quick-loc-name"
+                className="input"
+                placeholder="e.g. Stage 4 — holding"
+                value={quickLocName}
+                onChange={(e) => setQuickLocName(e.target.value)}
+              />
+            </div>
+            <button
+              type="button"
+              className="btn btn-primary btn-block"
+              disabled={!quickLocName.trim()}
+              onClick={saveQuickPlace}
+            >
+              Save place
+            </button>
+            <Link to="/locations" className="btn btn-secondary btn-block">
+              More places…
             </Link>
           </div>
         ) : !isLocationLocked ? (
@@ -434,6 +497,11 @@ export function ScanPage() {
         >
           Add to Log
         </button>
+        {addToLogHint ? (
+          <p className="muted" style={{ margin: 0, fontSize: "0.85rem" }}>
+            {addToLogHint}
+          </p>
+        ) : null}
         <button
           type="button"
           className="btn btn-primary btn-block"
