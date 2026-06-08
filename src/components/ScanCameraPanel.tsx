@@ -12,6 +12,8 @@ import { captureVideoFrame, decodeQrFromCanvas } from "@/lib/scanQrFromImage";
 
 type ScanMode = "qr" | "label";
 
+const SCAN_HARD_CAP_MS = 20_000;
+
 type Props = {
   mode: ScanMode;
   onQrDecoded: (text: string) => void;
@@ -35,6 +37,7 @@ export function ScanCameraPanel({
   onCameraError,
 }: Props) {
   const videoRef = useRef<HTMLVideoElement>(null);
+  const scanGenRef = useRef(0);
   const [ready, setReady] = useState(false);
   const [busy, setBusy] = useState(false);
   const [readPhase, setReadPhase] = useState<ScanReadPhase | null>(null);
@@ -84,14 +87,22 @@ export function ScanCameraPanel({
     if (!video || !ready || busy) return;
 
     triggerCaptureFeedback(setFlash);
+    const scanGen = ++scanGenRef.current;
     setBusy(true);
     setReadPhase(null);
+    const hardCap = window.setTimeout(() => {
+      if (scanGenRef.current !== scanGen) return;
+      scanGenRef.current += 1;
+      setBusy(false);
+      setReadPhase(null);
+      onCameraError?.("Scan took too long — tap Scan to try again.");
+    }, SCAN_HARD_CAP_MS);
 
     try {
-      const canvas = mode === "label" ? cropVideoFrameToGuide(video) : await captureVideoFrame(video);
       if (mode === "label") {
         await new Promise((r) => window.setTimeout(r, 350));
       }
+      const canvas = mode === "label" ? cropVideoFrameToGuide(video) : await captureVideoFrame(video);
       const jpegDataUrl = canvas.toDataURL("image/jpeg", 0.95);
 
       if (mode === "qr") {
@@ -107,6 +118,7 @@ export function ScanCameraPanel({
       }
 
       const outcome = await scanLabelFromCapture(canvas, jpegDataUrl, (phase) => setReadPhase(phase));
+      if (scanGenRef.current !== scanGen) return;
       const hasFields = Boolean(outcome.fields.job || outcome.fields.fabric || outcome.fields.size);
 
       onLabelFields?.(outcome.fields);
@@ -115,6 +127,7 @@ export function ScanCameraPanel({
 
       if (hasFields) hapticSuccess();
     } catch (e) {
+      if (scanGenRef.current !== scanGen) return;
       const raw = e instanceof Error ? e.message : "Could not read scan.";
       const message =
         raw.includes("MIME type") || raw.includes("Failed to fetch") || raw.includes("Load failed")
@@ -126,6 +139,8 @@ export function ScanCameraPanel({
         message,
       });
     } finally {
+      window.clearTimeout(hardCap);
+      if (scanGenRef.current !== scanGen) return;
       setBusy(false);
       setReadPhase(null);
     }

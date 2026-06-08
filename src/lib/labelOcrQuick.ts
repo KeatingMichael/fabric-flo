@@ -91,9 +91,7 @@ export async function blockLabelRead(source: HTMLCanvasElement): Promise<LabelOc
 export async function readLabelOnPhone(source: HTMLCanvasElement): Promise<LabelOcrFields> {
   const stripFields = await threeLineLabelRead(source);
   if (stripFields.job && stripFields.fabric && stripFields.size) return stripFields;
-
-  const block = await blockLabelRead(source);
-  return mergeLabelFields(stripFields, block);
+  return stripFields;
 }
 
 export function mergeLabelFields(primary: LabelOcrFields, fallback: LabelOcrFields | null): LabelOcrFields {

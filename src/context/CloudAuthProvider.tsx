@@ -143,7 +143,7 @@ export function CloudSessionBootstrap() {
 
     const uid = session.user.id;
     const key = `ffboot_${uid}`;
-    if (sessionStorage.getItem(key) === session.access_token) return;
+    if (sessionStorage.getItem(key) === "done") return;
 
     let cancelled = false;
     void (async () => {
@@ -213,14 +213,14 @@ export function CloudSessionBootstrap() {
         }
       } finally {
         if (!cancelled) {
-          sessionStorage.setItem(key, session.access_token);
+          sessionStorage.setItem(key, "done");
         }
       }
     })();
     return () => {
       cancelled = true;
     };
-  }, [configured, ready, session?.user?.id, session?.access_token, setSuppressAutoPush]);
+  }, [configured, ready, session?.user?.id, setSuppressAutoPush]);
 
   return null;
 }

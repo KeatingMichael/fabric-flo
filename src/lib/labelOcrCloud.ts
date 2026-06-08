@@ -47,7 +47,8 @@ export type LabelScanOutcome = LabelOcrCloudOutcome & { message: string };
 
 export type ScanReadPhase = "cloud" | "phone";
 
-const CLOUD_OCR_TIMEOUT_MS = 14_000;
+const CLOUD_OCR_TIMEOUT_MS = 12_000;
+const PHONE_OCR_TIMEOUT_MS = 6_000;
 const SCAN_CLOUD_MAX_EDGE = 2600;
 const EMPTY_FIELDS: LabelOcrFields = { job: "", fabric: "", size: "" };
 
@@ -136,7 +137,11 @@ function mergeOutcomes(cloud: LabelOcrCloudOutcome, phone: LabelOcrFields): Labe
   return { fields, status: scoreFields(fields) };
 }
 
-/** Cloud + on-phone label read in parallel — core Scan path. */
+function labelFieldsComplete(fields: LabelOcrFields): boolean {
+  return Boolean(fields.job && fields.fabric && fields.size);
+}
+
+/** Cloud first; phone OCR only when cloud misses, both capped by timeout. */
 export async function scanLabelFromCapture(
   source: HTMLCanvasElement,
   jpegDataUrl?: string,
@@ -146,12 +151,18 @@ export async function scanLabelFromCapture(
   const request = prepareCloudRequest(source, jpegDataUrl);
 
   onPhase?.("cloud");
-  onPhase?.("phone");
+  const cloudOutcome = await recognizeLabelFieldsCloudWithStatus(request);
 
-  const [cloudOutcome, phoneFields] = await Promise.all([
-    recognizeLabelFieldsCloudWithStatus(request),
-    readLabelOnPhone(cropped),
-  ]);
+  let phoneFields = EMPTY_FIELDS;
+  const cloudComplete =
+    labelFieldsComplete(cloudOutcome.fields) ||
+    cloudOutcome.status === "success" ||
+    (cloudOutcome.status === "partial" && hasAnyLabelField(cloudOutcome.fields));
+
+  if (!cloudComplete) {
+    onPhase?.("phone");
+    phoneFields = await withTimeout(readLabelOnPhone(cropped), PHONE_OCR_TIMEOUT_MS, EMPTY_FIELDS);
+  }
 
   const outcome = mergeOutcomes(cloudOutcome, phoneFields);
 
@@ -181,22 +192,31 @@ async function recognizeLabelFieldsCloudInner(request: LabelOcrRequest): Promise
   }
 
   const {
-    data: { user },
-  } = await sb.auth.getUser();
-  if (!user) {
+    data: { session },
+  } = await sb.auth.getSession();
+  if (!session?.user) {
     return { fields: EMPTY_FIELDS, status: "not_signed_in" };
   }
-
-  await sb.auth.refreshSession();
 
   if (!request.imageBase64) {
     return { fields: EMPTY_FIELDS, status: "error" };
   }
 
-  try {
-    const { data, error } = await sb.functions.invoke<LabelOcrResponse>("label-ocr", {
+  const invokeOnce = () =>
+    sb.functions.invoke<LabelOcrResponse>("label-ocr", {
       body: request,
     });
+
+  try {
+    let { data, error } = await invokeOnce();
+
+    if (error) {
+      const msg = typeof error.message === "string" ? error.message : "";
+      if (msg.includes("401") || msg.includes("not_authenticated")) {
+        await sb.auth.refreshSession();
+        ({ data, error } = await invokeOnce());
+      }
+    }
 
     if (error) {
       console.warn("label-ocr invoke error:", error);
