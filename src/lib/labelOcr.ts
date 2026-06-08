@@ -48,6 +48,12 @@ type OcrAttempt = {
   labelScore: number;
 };
 
+export type LabelOcrFields = {
+  job: string;
+  fabric: string;
+  size: string;
+};
+
 /** Crop camera frame to the on-screen viewfinder guide (accounts for object-fit: cover). */
 export function cropVideoFrameToGuide(video: HTMLVideoElement): HTMLCanvasElement {
   const vw = video.videoWidth;
@@ -166,6 +172,21 @@ function scaleCanvas(source: HTMLCanvasElement, targetLongEdge: number): HTMLCan
   canvas.height = h;
   const ctx = canvas.getContext("2d");
   if (!ctx) return source;
+  ctx.imageSmoothingEnabled = false;
+  ctx.drawImage(source, 0, 0, w, h);
+  return canvas;
+}
+
+function scaleCanvasWidth(source: HTMLCanvasElement, widthFactor: number): HTMLCanvasElement {
+  const w = Math.max(1, Math.round(source.width * widthFactor));
+  const h = source.height;
+  const canvas = document.createElement("canvas");
+  canvas.width = w;
+  canvas.height = h;
+  const ctx = canvas.getContext("2d");
+  if (!ctx) return source;
+  ctx.fillStyle = "#fff";
+  ctx.fillRect(0, 0, w, h);
   ctx.imageSmoothingEnabled = false;
   ctx.drawImage(source, 0, 0, w, h);
   return canvas;
@@ -525,10 +546,23 @@ function repairFabricLine(line: string): string {
   return trimmed;
 }
 
-function repairSizeLine(line: string): string {
+function repairSizeLine(line: string, rawContext = ""): string {
   const trimmed = normalizeLine(line);
-  const direct = extractDimensions(trimmed);
-  if (direct) return direct;
+  let direct = extractDimensions(trimmed);
+  if (direct) {
+    const matched = direct.match(/^(\d+)' X (\d+)'$/);
+    if (matched && matched[1] === matched[2] && matched[1]!.length === 1 && Number(matched[1]!) <= 3) {
+      const ctxSize = extractDimensions(rawContext);
+      if (ctxSize) {
+        const ctxMatched = ctxSize.match(/^(\d+)' X (\d+)'$/);
+        if (ctxMatched && ctxMatched[1]!.length >= 2) return ctxSize;
+      }
+      if (/\b12\b/.test(rawContext)) return "12' X 12'";
+      if (/\b20\b/.test(rawContext)) return "20' X 20'";
+      if (/\b8\b/.test(rawContext)) return "8' X 8'";
+    }
+    return direct;
+  }
 
   const partial = trimmed.match(/^(\d)\s*'?\s*[xX]\s*'?\s*(\d{1,2})'?$/);
   if (partial) {
@@ -633,14 +667,14 @@ function repairLabelParts(lines: string[], rawContext = ""): string {
     return [
       repairJobLine(lines[0]!),
       repairFabricLine(lines[1]!),
-      repairSizeLine(lines[2]!),
+      repairSizeLine(lines[2]!, rawContext),
     ].join(" / ");
   }
 
   if (lines.length === 2) {
     const secondIsSize = Boolean(extractDimensions(lines[1]!) || /\d/.test(lines[1]!));
     if (secondIsSize) {
-      return [repairJobLine(lines[0]!), repairSizeLine(lines[1]!)].join(" / ");
+      return [repairJobLine(lines[0]!), repairSizeLine(lines[1]!, rawContext)].join(" / ");
     }
     return [repairJobLine(lines[0]!), repairFabricLine(lines[1]!)].join(" / ");
   }
@@ -753,10 +787,11 @@ async function ensembleDigitRead(worker: Worker, strip: HTMLCanvasElement): Prom
 async function recognizeStripRaw(
   worker: Worker,
   source: HTMLCanvasElement,
-  whitelist: string
+  whitelist: string,
+  psm: PSM = PSM.SINGLE_LINE
 ): Promise<string> {
   await worker.setParameters({
-    tessedit_pageseg_mode: PSM.SINGLE_LINE,
+    tessedit_pageseg_mode: psm,
     tessedit_char_whitelist: whitelist,
     preserve_interword_spaces: "1",
     user_defined_dpi: "300",
@@ -765,6 +800,202 @@ async function recognizeStripRaw(
     data: { text },
   } = await worker.recognize(source);
   return normalizeLine(text);
+}
+
+function bandVariants(band: HTMLCanvasElement): HTMLCanvasElement[] {
+  return [
+    band,
+    scaleCanvasWidth(band, 1.8),
+    scaleCanvas(band, 3200),
+    preprocessLabelContrast(band),
+    preprocessLabelBinarize(band),
+    thickenBinary(preprocessLabelBinarize(band)),
+  ];
+}
+
+function scoreFabricCandidate(text: string): number {
+  const compact = text.toUpperCase().replace(/[^A-Z]/g, "");
+  if (compact.length < 3) return 0;
+  if (SOLID_ALIASES.has(compact)) return 100;
+  for (const kw of FABRIC_KEYWORDS) {
+    if (compact === kw) return 92;
+    if (levenshtein(compact, kw) <= 1) return 82;
+    if (levenshtein(compact, kw) === 2) return 55;
+  }
+  return scoreReadableLine(text);
+}
+
+function scoreJobDigits(digits: string): number {
+  if (digits.length < 4) return 0;
+  let score = digits.length * 12;
+  if (digits.length >= 5 && digits.length <= 6) score += 25;
+  if (digits.length === 4) score += 8;
+  return score;
+}
+
+function scoreSizeCandidate(size: string): number {
+  const matched = size.match(/^(\d+)' X (\d+)'$/);
+  if (!matched) return scoreReadableLine(size);
+  let score = 30;
+  if (matched[1] === matched[2]) score += 25;
+  if (matched[1]!.length >= 2) score += 20;
+  if (Number(matched[1]) >= 6) score += 10;
+  return score;
+}
+
+function pickBestJobFromCandidates(candidates: string[], rawContext: string): string {
+  const digitRuns: string[] = [];
+  for (const candidate of candidates) {
+    const digits = candidate.replace(/\D/g, "");
+    if (digits.length >= 4) digitRuns.push(digits);
+    const fromLetters = lettersToJobDigits(candidate);
+    if (fromLetters) digitRuns.push(fromLetters);
+  }
+  const fromContext = extractBestJobNumber(rawContext);
+  if (fromContext) digitRuns.push(fromContext);
+
+  if (digitRuns.length) {
+    digitRuns.sort((a, b) => scoreJobDigits(b) - scoreJobDigits(a));
+    return digitRuns[0]!;
+  }
+
+  const labelReads = candidates.map(repairJobLine).filter(Boolean);
+  labelReads.sort((a, b) => b.replace(/\D/g, "").length - a.replace(/\D/g, "").length);
+  return labelReads[0] ?? "";
+}
+
+function pickBestFabricFromCandidates(candidates: string[]): string {
+  const votes = new Map<string, number>();
+  for (const candidate of candidates) {
+    const repaired = repairFabricLine(candidate);
+    const key = repaired.toUpperCase();
+    votes.set(key, (votes.get(key) ?? 0) + scoreFabricCandidate(candidate));
+  }
+  let best = "";
+  let bestScore = 0;
+  for (const [fabric, score] of votes) {
+    if (score > bestScore) {
+      bestScore = score;
+      best = fabric;
+    }
+  }
+  return best || repairFabricLine(candidates[0] ?? "");
+}
+
+function pickBestSizeFromCandidates(candidates: string[], rawContext: string): string {
+  const options = new Map<string, number>();
+  for (const candidate of candidates) {
+    const repaired = repairSizeLine(candidate, `${rawContext}\n${candidate}`);
+    if (!repaired) continue;
+    options.set(
+      repaired,
+      (options.get(repaired) ?? 0) + scoreSizeCandidate(repaired) + scoreReadableLine(candidate)
+    );
+  }
+  const fromContext = extractDimensions(rawContext);
+  if (fromContext) {
+    options.set(fromContext, (options.get(fromContext) ?? 0) + scoreSizeCandidate(fromContext) + 15);
+  }
+
+  let best = "";
+  let bestScore = 0;
+  for (const [size, score] of options) {
+    if (score > bestScore) {
+      bestScore = score;
+      best = size;
+    }
+  }
+  return best || repairSizeLine(candidates[0] ?? "", rawContext);
+}
+
+async function readBandDigits(worker: Worker, band: HTMLCanvasElement): Promise<string[]> {
+  const results: string[] = [];
+  for (const variant of bandVariants(band)) {
+    for (const psm of [PSM.SINGLE_LINE, PSM.SINGLE_WORD, PSM.RAW_LINE]) {
+      const text = await recognizeStripRaw(worker, variant, DIGIT_WHITELIST, psm);
+      const digits = text.replace(/\D/g, "");
+      if (digits.length >= 3) results.push(digits);
+    }
+    const ensemble = await ensembleDigitRead(worker, variant);
+    if (ensemble.length >= 3) results.push(ensemble);
+    const labelRead = await recognizeStripRaw(worker, variant, LABEL_CHAR_WHITELIST);
+    if (labelRead) results.push(labelRead);
+  }
+  return results;
+}
+
+async function readBandFabric(worker: Worker, band: HTMLCanvasElement): Promise<string[]> {
+  const results: string[] = [];
+  for (const variant of bandVariants(band)) {
+    const letters = await recognizeStripRaw(worker, variant, LETTER_WHITELIST);
+    if (letters.length >= 3) results.push(letters);
+    const gentle = await recognizeStripRaw(worker, preprocessLabelContrast(variant), LETTER_WHITELIST);
+    if (gentle.length >= 3) results.push(gentle);
+  }
+  return results;
+}
+
+async function readBandSize(worker: Worker, band: HTMLCanvasElement): Promise<string[]> {
+  const results: string[] = [];
+  for (const variant of bandVariants(band)) {
+    const size = await recognizeStripRaw(worker, variant, SIZE_WHITELIST);
+    if (size.length >= 2) results.push(size);
+    const digits = (await recognizeStripRaw(worker, variant, DIGIT_WHITELIST)).replace(/\D/g, "");
+    if (digits.length >= 2) results.push(digits);
+    const label = await recognizeStripRaw(worker, variant, LABEL_CHAR_WHITELIST);
+    if (label) results.push(label);
+  }
+  return results;
+}
+
+async function runBandFieldOcr(
+  worker: Worker,
+  canvas: HTMLCanvasElement
+): Promise<{ fields: LabelOcrFields; rawContext: string }> {
+  const prepped = preprocessLabelContrast(scaleCanvas(canvas, 4000));
+  const bands = findInkLineBands(prepped);
+  const rawParts: string[] = [];
+
+  let jobCandidates: string[] = [];
+  let fabricCandidates: string[] = [];
+  let sizeCandidates: string[] = [];
+
+  if (bands.length >= 2) {
+    const jobBand = cropInkBand(prepped, bands[0]!);
+    jobCandidates = await readBandDigits(worker, jobBand);
+    rawParts.push(...jobCandidates);
+
+    if (bands.length >= 2) {
+      const fabricBand = cropInkBand(prepped, bands[1]!);
+      fabricCandidates = await readBandFabric(worker, fabricBand);
+      rawParts.push(...fabricCandidates);
+    }
+
+    if (bands.length >= 3) {
+      const sizeBand = cropInkBand(prepped, bands[2]!);
+      sizeCandidates = await readBandSize(worker, sizeBand);
+      rawParts.push(...sizeCandidates);
+    }
+  }
+
+  const jobBandFallback = cropVerticalBand(canvas, 0, 0.36);
+  jobCandidates.push(...(await readBandDigits(worker, jobBandFallback)));
+
+  const fabricBandFallback = cropVerticalBand(canvas, 0.28, 0.36);
+  fabricCandidates.push(...(await readBandFabric(worker, fabricBandFallback)));
+
+  const sizeBandFallback = cropVerticalBand(canvas, 0.58, 0.38);
+  sizeCandidates.push(...(await readBandSize(worker, sizeBandFallback)));
+
+  const rawContext = rawParts.join("\n");
+  return {
+    rawContext,
+    fields: {
+      job: pickBestJobFromCandidates(jobCandidates, rawContext),
+      fabric: pickBestFabricFromCandidates(fabricCandidates),
+      size: pickBestSizeFromCandidates(sizeCandidates, rawContext),
+    },
+  };
 }
 
 async function ocrStripLine(
@@ -815,7 +1046,7 @@ async function ocrStripLine(
   }
 
   if (index >= 2) {
-    const repaired = normalized.map(repairSizeLine);
+    const repaired = normalized.map((line) => repairSizeLine(line));
     repaired.sort((a, b) => scoreLabelText(b) - scoreLabelText(a));
     return repaired[0]!;
   }
@@ -892,10 +1123,10 @@ function pickBestAttempt(attempts: OcrAttempt[]): string {
   return scoreLabelText(structured) > scoreLabelText(best) ? structured : best;
 }
 
-/** Run OCR on a captured label photo (canvas, image, or data URL). */
-export async function recognizeLabelFromImage(
+/** Run OCR on a captured label photo; returns the three sticker lines separately. */
+export async function recognizeLabelFieldsFromImage(
   source: HTMLCanvasElement | HTMLImageElement | string
-): Promise<string> {
+): Promise<LabelOcrFields> {
   let canvas: HTMLCanvasElement;
   if (typeof source === "string") {
     const img = await loadImage(source);
@@ -913,6 +1144,9 @@ export async function recognizeLabelFromImage(
   const rawChunks: string[] = [];
 
   try {
+    const bandResult = await runBandFieldOcr(worker, canvas);
+    rawChunks.push(bandResult.rawContext);
+
     const jobBand = cropVerticalBand(canvas, 0, 0.38);
     for (const variant of [
       preprocessLabelBinarize(jobBand),
@@ -921,9 +1155,9 @@ export async function recognizeLabelFromImage(
     ]) {
       const digits = (await recognizeStripRaw(worker, variant, DIGIT_WHITELIST)).replace(/\D/g, "");
       rawChunks.push(digits);
-      if (digits.length >= 5) {
+      if (digits.length >= 4) {
         attempts.push({
-          text: repairLabelParts([digits], digits) || digits,
+          text: digits,
           confidence: 80,
           labelScore: scoreLabelText(digits),
         });
@@ -935,55 +1169,72 @@ export async function recognizeLabelFromImage(
       attempts.push(strip3);
       rawChunks.push(strip3.text);
 
-      if (strip3.labelScore >= 95) {
-        const parts = strip3.text.split("/").map((p) => p.trim()).filter(Boolean);
-        return repairLabelParts(parts, rawChunks.join("\n")) || pickBestAttempt(attempts);
-      }
-
       const block = await runOcrPass(worker, variant, PSM.SINGLE_BLOCK);
       attempts.push(block);
       rawChunks.push(block.raw);
 
-      if (attempts.length <= 2) {
+      if (attempts.length <= 4) {
         attempts.push(await runStripOcr(worker, variant, 4));
       }
-
-      const bestSoFar = pickBestAttempt(attempts);
-      if (scoreLabelText(bestSoFar) >= 100) return bestSoFar;
     }
 
-    const structuredFromAll = extractLabelFields(rawChunks.join("\n"));
-    const mergedFromRaw = repairLabelParts([], rawChunks.join("\n"));
-    attempts.push({
-      text: scoreLabelText(mergedFromRaw) >= scoreLabelText(structuredFromAll) ? mergedFromRaw : structuredFromAll,
-      confidence: structuredFromAll || mergedFromRaw ? 75 : 0,
-      labelScore: Math.max(scoreLabelText(structuredFromAll), scoreLabelText(mergedFromRaw)),
-    });
+    const allRaw = rawChunks.join("\n");
+    const merged = pickBestAttempt(attempts);
+    const mergedParts = splitLabelIntoFields(merged, allRaw);
 
-    const best = pickBestAttempt(attempts);
-    const parts = best.split("/").map((p) => p.trim()).filter(Boolean);
-    const repaired = repairLabelParts(parts, rawChunks.join("\n"));
-    return repaired || best;
+    const fields: LabelOcrFields = {
+      job:
+        pickBestJobFromCandidates(
+          [bandResult.fields.job, mergedParts.job, ...rawChunks],
+          allRaw
+        ) || bandResult.fields.job,
+      fabric:
+        pickBestFabricFromCandidates([
+          bandResult.fields.fabric,
+          mergedParts.fabric,
+          ...attempts.flatMap((a) => a.text.split("/").map((p) => p.trim())),
+        ]) || bandResult.fields.fabric,
+      size:
+        pickBestSizeFromCandidates(
+          [bandResult.fields.size, mergedParts.size, ...rawChunks],
+          allRaw
+        ) || bandResult.fields.size,
+    };
+
+    if (!fields.job && !fields.fabric && !fields.size) {
+      return bandResult.fields;
+    }
+    return fields;
   } finally {
     await worker.terminate();
   }
 }
 
+/** Run OCR on a captured label photo (canvas, image, or data URL). */
+export async function recognizeLabelFromImage(
+  source: HTMLCanvasElement | HTMLImageElement | string
+): Promise<string> {
+  const fields = await recognizeLabelFieldsFromImage(source);
+  return joinLabelFields(fields.job, fields.fabric, fields.size);
+}
+
 /** Split combined label OCR into the three common sticker lines. */
-export function splitLabelIntoFields(text: string): { job: string; fabric: string; size: string } {
+export function splitLabelIntoFields(
+  text: string,
+  rawContext = ""
+): { job: string; fabric: string; size: string } {
   const parts = text.split("/").map((p) => p.trim()).filter(Boolean);
   if (parts.length >= 3) {
     return {
-      job: repairJobLine(parts[0]!),
-      fabric: repairFabricLine(parts[1]!),
-      size: repairSizeLine(parts[2]!),
+      job: pickBestJobFromCandidates([parts[0]!], `${rawContext}\n${text}`),
+      fabric: pickBestFabricFromCandidates([parts[1]!]),
+      size: pickBestSizeFromCandidates([parts[2]!], `${rawContext}\n${text}`),
     };
   }
-  const jobFromContext = extractBestJobNumber(text);
   return {
-    job: jobFromContext ?? repairJobLine(parts[0] ?? ""),
-    fabric: repairFabricLine(parts[1] ?? ""),
-    size: repairSizeLine(parts[2] ?? parts.slice(2).join(" / ")),
+    job: pickBestJobFromCandidates(parts.length ? [parts[0]!] : [], `${rawContext}\n${text}`),
+    fabric: pickBestFabricFromCandidates(parts[1] ? [parts[1]] : []),
+    size: pickBestSizeFromCandidates(parts.slice(2), `${rawContext}\n${text}`),
   };
 }
 

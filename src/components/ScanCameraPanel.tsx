@@ -1,7 +1,7 @@
 import { useEffect, useRef, useState } from "react";
 import { playCameraShutter } from "@/lib/cameraFeedback";
 import { hapticCameraCapture, hapticSuccess } from "@/lib/haptics";
-import { cropVideoFrameToGuide, recognizeLabelFromImage } from "@/lib/labelOcr";
+import { cropVideoFrameToGuide, recognizeLabelFieldsFromImage, type LabelOcrFields } from "@/lib/labelOcr";
 import { captureVideoFrame, decodeQrFromCanvas } from "@/lib/scanQrFromImage";
 
 type ScanMode = "qr" | "label";
@@ -9,7 +9,8 @@ type ScanMode = "qr" | "label";
 type Props = {
   mode: ScanMode;
   onQrDecoded: (text: string) => void;
-  onLabelText: (text: string) => void;
+  onLabelText?: (text: string) => void;
+  onLabelFields?: (fields: LabelOcrFields) => void;
   onError?: (message: string | null) => void;
 };
 
@@ -20,7 +21,7 @@ function triggerCaptureFeedback(setFlash: (on: boolean) => void): void {
   window.setTimeout(() => setFlash(false), 120);
 }
 
-export function ScanCameraPanel({ mode, onQrDecoded, onLabelText, onError }: Props) {
+export function ScanCameraPanel({ mode, onQrDecoded, onLabelText, onLabelFields, onError }: Props) {
   const videoRef = useRef<HTMLVideoElement>(null);
   const [ready, setReady] = useState(false);
   const [busy, setBusy] = useState(false);
@@ -85,13 +86,14 @@ export function ScanCameraPanel({ mode, onQrDecoded, onLabelText, onError }: Pro
         return;
       }
 
-      const text = await recognizeLabelFromImage(canvas);
-      if (!text) {
+      const fields = await recognizeLabelFieldsFromImage(canvas);
+      if (!fields.job && !fields.fabric && !fields.size) {
         onError?.("No text detected — try brighter light, closer framing, or type the label below.");
         return;
       }
       hapticSuccess();
-      onLabelText(text);
+      onLabelFields?.(fields);
+      onLabelText?.([fields.job, fields.fabric, fields.size].filter(Boolean).join(" / "));
     } catch (e) {
       onError?.(e instanceof Error ? e.message : "Could not read scan.");
     } finally {

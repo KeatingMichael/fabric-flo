@@ -3,7 +3,7 @@ import { Link, useLocation, useNavigate } from "react-router-dom";
 import { ScanCameraPanel } from "@/components/ScanCameraPanel";
 import { isNativeApp } from "@/lib/native";
 import { hapticLight, hapticSuccess } from "@/lib/haptics";
-import { joinLabelFields, splitLabelIntoFields } from "@/lib/labelOcr";
+import { joinLabelFields } from "@/lib/labelOcr";
 import { readScanNavState } from "@/lib/scanNavigation";
 import type { ScanMethod } from "@/types";
 
@@ -106,9 +106,8 @@ export function ScanPage() {
       <ScanCameraPanel
         mode={mode}
         onQrDecoded={onQrDecoded}
-        onLabelText={(text) => {
+        onLabelFields={(fields) => {
           setError(null);
-          const fields = splitLabelIntoFields(text);
           setLabelJob(fields.job);
           setLabelFabric(fields.fabric);
           setLabelSize(fields.size);
@@ -130,7 +129,7 @@ export function ScanPage() {
         <p style={{ marginBottom: 0 }}>
           {mode === "qr"
             ? "If the camera is unavailable, paste the QR JSON or code here."
-            : "Three lines like most rental stickers — fix any line the camera got wrong."}
+            : "Fill the frame with the white label only — then fix any line the camera got wrong."}
         </p>
         {mode === "qr" ? (
           <textarea
