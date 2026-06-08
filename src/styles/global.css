@@ -671,6 +671,155 @@ p {
   font-size: 0.92rem;
 }
 
+.scan-page {
+  gap: 0.85rem;
+}
+
+.scan-page__header {
+  margin: 0;
+}
+
+.scan-page__header h1 {
+  margin: 0 0 0.25rem;
+}
+
+.scan-page__lead {
+  margin: 0;
+  font-size: 0.9rem;
+  line-height: 1.4;
+}
+
+.scan-toast {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 0.5rem;
+  padding: 0.55rem 0.75rem;
+  border-radius: var(--radius-sm);
+  border: 1px solid rgba(74, 222, 128, 0.35);
+  background: rgba(74, 222, 128, 0.1);
+  font-size: 0.88rem;
+}
+
+.scan-toast__dismiss {
+  flex-shrink: 0;
+  border: none;
+  background: transparent;
+  color: var(--muted);
+  font-size: 1.2rem;
+  line-height: 1;
+  padding: 0 0.1rem;
+  cursor: pointer;
+}
+
+.scan-mode-tabs {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 0.35rem;
+  padding: 0.25rem;
+  border-radius: var(--radius-sm);
+  border: 1px solid var(--border);
+  background: rgba(15, 23, 42, 0.5);
+}
+
+.scan-mode-tabs__btn {
+  min-height: 42px;
+  border: none;
+  border-radius: calc(var(--radius-sm) - 2px);
+  background: transparent;
+  color: var(--muted);
+  font-size: 0.88rem;
+  font-weight: 600;
+  cursor: pointer;
+}
+
+.scan-mode-tabs__btn--active {
+  background: var(--accent);
+  color: #0f172a;
+}
+
+.scan-status {
+  margin: 0;
+  padding: 0.55rem 0.7rem;
+  border-radius: var(--radius-sm);
+  font-size: 0.86rem;
+  line-height: 1.35;
+}
+
+.scan-status--ok {
+  border: 1px solid rgba(34, 197, 94, 0.35);
+  background: rgba(34, 197, 94, 0.08);
+}
+
+.scan-status--warn {
+  border: 1px solid rgba(251, 191, 36, 0.35);
+  background: rgba(251, 191, 36, 0.08);
+}
+
+.scan-status--neutral {
+  border: 1px solid var(--border);
+  background: rgba(15, 23, 42, 0.35);
+}
+
+.scan-sheet {
+  gap: 0.85rem;
+}
+
+.scan-place-locked {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+  flex-wrap: wrap;
+  font-size: 0.92rem;
+}
+
+.scan-place-locked__change {
+  margin-left: auto;
+  border: none;
+  background: transparent;
+  color: var(--accent);
+  font-size: 0.85rem;
+  font-weight: 600;
+  cursor: pointer;
+  padding: 0.25rem 0;
+}
+
+.scan-place-setup__row {
+  width: 100%;
+  gap: 0.45rem;
+  align-items: stretch;
+}
+
+.scan-place-setup__row .select {
+  flex: 0 0 38%;
+  min-width: 0;
+}
+
+.scan-place-setup__row .input {
+  flex: 1;
+  min-width: 0;
+}
+
+.scan-label-fields {
+  display: grid;
+  gap: 0.65rem;
+}
+
+.scan-actions {
+  gap: 0.5rem;
+  padding-top: 0.15rem;
+}
+
+.scan-cancel {
+  align-self: center;
+  font-size: 0.88rem;
+  text-decoration: none;
+}
+
+.scan-cancel:hover {
+  color: var(--text);
+}
+
 .scan-flash__dismiss {
   flex-shrink: 0;
   border: none;
@@ -836,70 +985,22 @@ p {
   pointer-events: none;
 }
 
-.scan-read-banner {
+.scan-place-setup__note {
   margin: 0;
-  padding: 0.75rem 0.85rem;
-  border-radius: var(--radius-sm);
-  font-size: 0.88rem;
-  line-height: 1.35;
 }
 
-.scan-read-banner--ok {
-  border: 1px solid rgba(34, 197, 94, 0.45);
-  background: rgba(34, 197, 94, 0.12);
-}
-
-.scan-read-banner--warn {
-  border: 1px solid rgba(251, 191, 36, 0.45);
-  background: rgba(251, 191, 36, 0.1);
-}
-
-.scan-readout {
-  margin: 0;
-  padding: 0.75rem 0.85rem;
-  border-radius: var(--radius-sm);
-  font-size: 1rem;
-  line-height: 1.45;
-  display: grid;
-  gap: 0.35rem;
-}
-
-.scan-readout--ok {
-  border: 1px solid rgba(34, 197, 94, 0.45);
-  background: rgba(34, 197, 94, 0.12);
-}
-
-.scan-readout--warn {
-  border: 1px solid rgba(251, 191, 36, 0.45);
-  background: rgba(251, 191, 36, 0.1);
-  font-size: 0.92rem;
-}
-
-.input--filled {
-  color: var(--text);
-  border-color: rgba(34, 197, 94, 0.45);
-}
-
-.input--needs-entry {
-  border-color: rgba(56, 189, 248, 0.55);
-}
-
-.scan-camera__hint {
-  margin: 0;
+.scan-place-setup__link {
   font-size: 0.85rem;
-  text-align: center;
+  color: var(--muted);
+  text-decoration: none;
 }
 
-.scan-camera__preview {
+.scan-field--compact {
+  margin-bottom: 0;
+}
+
+.scan-camera {
   width: 100%;
-  max-height: 120px;
-  object-fit: contain;
-  border-radius: var(--radius-sm);
-  border: 1px solid var(--border);
-}
-
-.locked-location-banner {
-  margin: 0;
 }
 
 #cloud-account {

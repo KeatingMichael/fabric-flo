@@ -3,9 +3,9 @@ import { Link, useLocation, useNavigate } from "react-router-dom";
 import { RecentLocationChips } from "@/components/RecentLocationChips";
 import { ScanCameraPanel } from "@/components/ScanCameraPanel";
 import { useActiveProduction, useApp } from "@/context/AppStore";
-import { isNativeApp } from "@/lib/native";
-import { hapticLight, hapticSuccess } from "@/lib/haptics";
+import { hapticSuccess } from "@/lib/haptics";
 import { joinLabelFields, looksLikeWeakFabricLine, looksLikeWeakJobLine, looksLikeWeakSizeLine } from "@/lib/labelOcr";
+import type { LabelScanOutcome } from "@/lib/labelOcrCloud";
 import {
   getLastLocationId,
   getRecentLocationIds,
@@ -39,6 +39,8 @@ const RENTAL_FABRIC_HINTS = [
   "NET",
 ];
 
+type ScanStatusTone = "ok" | "warn" | "neutral";
+
 export function ScanPage() {
   const navigate = useNavigate();
   const location = useLocation();
@@ -51,10 +53,12 @@ export function ScanPage() {
   const fabricInputRef = useRef<HTMLInputElement>(null);
   const sizeInputRef = useRef<HTMLInputElement>(null);
   const focusFieldAfterScan = useRef<"job" | "fabric" | "size" | null>(null);
-  const readSectionRef = useRef<HTMLElement>(null);
 
   const [mode, setMode] = useState<ScanMode>("label");
-  const [error, setError] = useState<string | null>(null);
+  const [cameraError, setCameraError] = useState<string | null>(null);
+  const [scanStatus, setScanStatus] = useState<{ message: string; tone: ScanStatusTone } | null>(
+    null
+  );
   const [manual, setManual] = useState("");
   const [labelJob, setLabelJob] = useState("");
   const [labelFabric, setLabelFabric] = useState("");
@@ -66,7 +70,6 @@ export function ScanPage() {
   const [savedFlash, setSavedFlash] = useState<{ itemName: string; locationLabel: string } | null>(
     null
   );
-  const [scanAttempted, setScanAttempted] = useState(false);
 
   const labelDraft = joinLabelFields(labelJob, labelFabric, labelSize);
   const scanText = (mode === "qr" ? manual : labelDraft).trim();
@@ -103,14 +106,7 @@ export function ScanPage() {
     rememberRecentLocation(production.id, id);
     setLocId(id);
     setQuickLocName("");
-    setError(null);
-  }
-
-  function addToLogBlockReason(hasPlaces: boolean): string | null {
-    if (!hasPlaces) return "Add a place first — clearing Safari data removes places saved only on this phone.";
-    if (!locId) return "Choose where this scan goes.";
-    if (!scanText) return "Tap SCAN or type the label fields above.";
-    return null;
+    setCameraError(null);
   }
 
   function groupedLocs(kind: LocationKind) {
@@ -135,25 +131,40 @@ export function ScanPage() {
     setLabelJob("");
     setLabelFabric("");
     setLabelSize("");
-    setScanAttempted(false);
+    setScanStatus(null);
+  }
+
+  function toneForOutcome(outcome: LabelScanOutcome): ScanStatusTone {
+    if (outcome.status === "success" || outcome.status === "partial") return "ok";
+    if (outcome.status === "no_text") return "warn";
+    return "warn";
+  }
+
+  function onLabelScan(outcome: LabelScanOutcome) {
+    setLabelJob(outcome.fields.job);
+    setLabelFabric(outcome.fields.fabric);
+    setLabelSize(outcome.fields.size);
+    setScanStatus({ message: outcome.message, tone: toneForOutcome(outcome) });
+
+    if (looksLikeWeakJobLine(outcome.fields.job)) focusFieldAfterScan.current = "job";
+    else if (looksLikeWeakFabricLine(outcome.fields.fabric)) focusFieldAfterScan.current = "fabric";
+    else if (looksLikeWeakSizeLine(outcome.fields.size)) focusFieldAfterScan.current = "size";
+    else if (!outcome.fields.job) focusFieldAfterScan.current = "job";
   }
 
   function addToLog() {
     if (!production || !scanText) return;
     const loc = production.locations.find((l) => l.id === locId);
     if (!loc) {
-      setError("Choose a place for this scan — or add one under Places.");
+      setScanStatus({ message: "Choose a place for this scan.", tone: "warn" });
       return;
     }
 
-    setError(null);
     rememberRecentLocation(production.id, loc.id);
 
     const resolved = resolveScan(production, scanText, scanMethodForAdd());
     const scanMethod = resolved.method;
-    const itemName = resolved.item
-      ? resolved.item.name
-      : unknownItemName(scanText);
+    const itemName = resolved.item ? resolved.item.name : unknownItemName(scanText);
 
     if (resolved.item) {
       if (scanMethod === "label" || scanMethod === "manual") {
@@ -174,8 +185,8 @@ export function ScanPage() {
       linkUnknownScan(production.id, scanText, "fabric", unknownItemName(scanText), loc.id);
     }
 
-    hapticSuccess();
     setSavedFlash({ itemName, locationLabel: loc.name });
+    hapticSuccess();
     clearScanFields();
     setLocationUnlocked(false);
     navigate("/scan", {
@@ -187,7 +198,6 @@ export function ScanPage() {
   function goFabrics(raw: string, scanMethod: ScanMethod) {
     const t = raw.trim();
     if (!t) return;
-    hapticLight();
     navigate("/inventory", {
       state: {
         raw: t,
@@ -199,9 +209,9 @@ export function ScanPage() {
   }
 
   function onQrDecoded(text: string) {
-    hapticSuccess();
     setManual(text.trim());
-    setError(null);
+    setScanStatus({ message: "QR captured — review below, then add to log.", tone: "ok" });
+    setCameraError(null);
   }
 
   useEffect(() => {
@@ -232,87 +242,58 @@ export function ScanPage() {
 
   const hasPlaces = production.locations.length > 0;
   const canAddToLog = Boolean(scanText && locId && hasPlaces);
-  const addToLogHint = addToLogBlockReason(hasPlaces);
+  const statusLine = cameraError ?? scanStatus?.message ?? null;
+  const statusTone = cameraError ? "warn" : (scanStatus?.tone ?? "neutral");
 
   return (
-    <div className="page stack">
-      <h1>{mode === "label" ? "Scan rental label" : "Scan dynamic QR"}</h1>
-      <p>
-        {mode === "label" ? (
-          <>
-            Most gear uses a <strong>rental-house sticker</strong> — job number, fabric type, and size.
-            Every house writes differently. Fill the frame with the whole label; the app pulls out each
-            field from whatever it reads.
-          </>
-        ) : (
-          <>
-            Use this when a piece has a Fabric Flo <strong>dynamic QR</strong> printed on it. Most inventory
-            today still uses handwritten rental labels instead.
-          </>
-        )}
-        {isNativeApp() ? " Camera access is not recorded." : null}
-      </p>
-
-      {isLocationLocked ? (
-        <div className="card locked-location-banner" style={{ borderColor: "rgba(56, 189, 248, 0.35)" }}>
-          <div className="row" style={{ justifyContent: "space-between", width: "100%", alignItems: "flex-start" }}>
-            <div>
-              <div className="muted" style={{ fontSize: "0.82rem" }}>
-                Logging everything to
-              </div>
-              <strong>{lockedLocationLabel}</strong>
-            </div>
-            <button
-              type="button"
-              className="btn btn-secondary"
-              style={{ minHeight: 40, padding: "0.35rem 0.65rem", fontSize: "0.82rem" }}
-              onClick={() => setLocationUnlocked(true)}
-            >
-              Change
-            </button>
-          </div>
-        </div>
-      ) : null}
+    <div className="page stack scan-page">
+      <header className="scan-page__header">
+        <h1>Scan</h1>
+        <p className="scan-page__lead muted">
+          {mode === "label"
+            ? "Fill the frame with the rental label, tap Scan, fix any field, then add to log."
+            : "Center the dynamic QR, tap Scan, then add to log."}
+        </p>
+      </header>
 
       {savedFlash ? (
-        <div className="scan-flash stack" role="status" style={{ gap: "0.65rem" }}>
-          <div className="row" style={{ width: "100%", alignItems: "flex-start" }}>
-            <div style={{ flex: 1 }}>
-              <strong>Saved to log.</strong> {savedFlash.itemName} → {savedFlash.locationLabel}
-            </div>
-            <button
-              type="button"
-              className="scan-flash__dismiss"
-              onClick={() => setSavedFlash(null)}
-              aria-label="Dismiss"
-            >
-              ×
-            </button>
-          </div>
-          <p className="muted" style={{ margin: 0, fontSize: "0.85rem" }}>
-            Scan the next piece — label fields clear after each save.
-          </p>
+        <div className="scan-toast" role="status">
+          <span>
+            Saved — {savedFlash.itemName} → {savedFlash.locationLabel}
+          </span>
+          <button
+            type="button"
+            className="scan-toast__dismiss"
+            onClick={() => setSavedFlash(null)}
+            aria-label="Dismiss"
+          >
+            ×
+          </button>
         </div>
       ) : null}
 
-      <div className="row" style={{ width: "100%" }}>
+      <div className="scan-mode-tabs" role="tablist" aria-label="Scan type">
         <button
           type="button"
-          className={`btn ${mode === "label" ? "btn-primary" : "btn-secondary"}`}
-          style={{ flex: 1 }}
+          role="tab"
+          aria-selected={mode === "label" ? "true" : "false"}
+          className={`scan-mode-tabs__btn${mode === "label" ? " scan-mode-tabs__btn--active" : ""}`}
           onClick={() => {
-            setError(null);
+            setCameraError(null);
+            setScanStatus(null);
             setMode("label");
           }}
         >
-          Handwritten label
+          Rental label
         </button>
         <button
           type="button"
-          className={`btn ${mode === "qr" ? "btn-primary" : "btn-secondary"}`}
-          style={{ flex: 1 }}
+          role="tab"
+          aria-selected={mode === "qr" ? "true" : "false"}
+          className={`scan-mode-tabs__btn${mode === "qr" ? " scan-mode-tabs__btn--active" : ""}`}
           onClick={() => {
-            setError(null);
+            setCameraError(null);
+            setScanStatus(null);
             setMode("qr");
           }}
         >
@@ -328,66 +309,35 @@ export function ScanPage() {
           setLabelFabric(fields.fabric);
           setLabelSize(fields.size);
         }}
-        onLabelScan={(outcome) => {
-          setScanAttempted(true);
-          setLabelJob(outcome.fields.job);
-          setLabelFabric(outcome.fields.fabric);
-          setLabelSize(outcome.fields.size);
-          if (outcome.status === "success" || outcome.status === "partial") {
-            setError(null);
-          }
-          if (looksLikeWeakJobLine(outcome.fields.job)) focusFieldAfterScan.current = "job";
-          else if (looksLikeWeakFabricLine(outcome.fields.fabric)) focusFieldAfterScan.current = "fabric";
-          else if (looksLikeWeakSizeLine(outcome.fields.size)) focusFieldAfterScan.current = "size";
-          else if (!outcome.fields.job) focusFieldAfterScan.current = "job";
-          window.requestAnimationFrame(() => {
-            readSectionRef.current?.scrollIntoView({ behavior: "smooth", block: "start" });
-          });
-        }}
-        onError={setError}
+        onLabelScan={onLabelScan}
+        onCameraError={setCameraError}
       />
 
-      {error ? (
-        <div className="card" style={{ borderColor: "rgba(251,191,36,0.35)" }}>
-          <strong style={{ color: "var(--warning)" }}>{mode === "qr" ? "Scan" : "Label"}</strong>
-          <p style={{ marginBottom: 0 }}>{error}</p>
-        </div>
+      {statusLine ? (
+        <p className={`scan-status scan-status--${statusTone}`} role="status">
+          {statusLine}
+        </p>
       ) : null}
 
-      <section ref={readSectionRef} className="card stack">
-        <h2 style={{ marginTop: 0 }}>
-          {mode === "qr" ? "Paste QR value" : "What we read"}
-        </h2>
-        <p style={{ marginBottom: 0 }}>
-          {mode === "qr"
-            ? "If the camera is unavailable, paste the QR JSON or code here."
-            : scanAttempted
-              ? "White text below is what the camera read — tap any box to fix it, then Add to Log."
-              : "After SCAN, editable fields appear here. You can always type from the sticker too."}
-        </p>
-        {scanAttempted && (labelJob || labelFabric || labelSize) ? (
-          <div className="scan-readout scan-readout--ok" role="status">
-            {labelJob ? <div><span className="muted">Job</span> {labelJob}</div> : null}
-            {labelFabric ? <div><span className="muted">Fabric</span> {labelFabric}</div> : null}
-            {labelSize ? <div><span className="muted">Size</span> {labelSize}</div> : null}
+      <section className="card stack scan-sheet">
+        {isLocationLocked ? (
+          <div className="scan-place-locked">
+            <span className="muted">Place</span>
+            <strong>{lockedLocationLabel}</strong>
+            <button type="button" className="scan-place-locked__change" onClick={() => setLocationUnlocked(true)}>
+              Change
+            </button>
           </div>
-        ) : scanAttempted ? (
-          <div className="scan-readout scan-readout--warn" role="status">
-            Camera didn&apos;t catch text — tap each box below and type from the sticker.
-          </div>
-        ) : null}
-        {!hasPlaces ? (
-          <div className="card stack" style={{ borderColor: "rgba(251,191,36,0.35)" }}>
-            <strong style={{ color: "var(--warning)" }}>Add a place first</strong>
-            <p style={{ marginBottom: 0 }}>
-              Every scan needs a studio, filming location, or truck. After clearing Safari data you may need to
-              add places again — they sync online once saved.
+        ) : !hasPlaces ? (
+          <div className="stack scan-place-setup">
+            <p className="muted scan-place-setup__note">
+              Add a place before logging scans.
             </p>
-            <div className="field">
-              <label htmlFor="scan-quick-loc-kind">Type</label>
+            <div className="row scan-place-setup__row">
               <select
                 id="scan-quick-loc-kind"
                 className="select"
+                aria-label="Place type"
                 value={quickLocKind}
                 onChange={(e) => setQuickLocKind(e.target.value as LocationKind)}
               >
@@ -397,30 +347,27 @@ export function ScanPage() {
                   </option>
                 ))}
               </select>
-            </div>
-            <div className="field">
-              <label htmlFor="scan-quick-loc-name">Place name</label>
               <input
                 id="scan-quick-loc-name"
                 className="input"
-                placeholder="e.g. Stage 4 — holding"
+                placeholder="Place name"
                 value={quickLocName}
                 onChange={(e) => setQuickLocName(e.target.value)}
               />
+              <button
+                type="button"
+                className="btn btn-primary"
+                disabled={!quickLocName.trim()}
+                onClick={saveQuickPlace}
+              >
+                Add
+              </button>
             </div>
-            <button
-              type="button"
-              className="btn btn-primary btn-block"
-              disabled={!quickLocName.trim()}
-              onClick={saveQuickPlace}
-            >
-              Save place
-            </button>
-            <Link to="/locations" className="btn btn-secondary btn-block">
-              More places…
+            <Link to="/locations" className="scan-place-setup__link">
+              Manage places
             </Link>
           </div>
-        ) : !isLocationLocked ? (
+        ) : (
           <>
             <RecentLocationChips
               locations={production.locations}
@@ -428,8 +375,8 @@ export function ScanPage() {
               selectedId={locId}
               onPick={setLocId}
             />
-            <div className="field">
-              <label htmlFor="scan-log-loc">Place for this scan</label>
+            <div className="field scan-field--compact">
+              <label htmlFor="scan-log-loc">Place</label>
               <select
                 id="scan-log-loc"
                 className="select"
@@ -453,23 +400,29 @@ export function ScanPage() {
               </select>
             </div>
           </>
-        ) : null}
+        )}
+
         {mode === "qr" ? (
-          <textarea
-            className="textarea"
-            placeholder="Paste dynamic QR JSON…"
-            value={manual}
-            onChange={(e) => setManual(e.target.value)}
-          />
+          <div className="field scan-field--compact">
+            <label htmlFor="scan-qr-manual">QR value</label>
+            <textarea
+              id="scan-qr-manual"
+              className="textarea"
+              placeholder="Paste if the camera did not read it"
+              value={manual}
+              onChange={(e) => setManual(e.target.value)}
+              rows={3}
+            />
+          </div>
         ) : (
-          <>
+          <div className="scan-label-fields">
             <div className="field">
-              <label htmlFor="label-job">Job or sticker number</label>
+              <label htmlFor="label-job">Job #</label>
               <input
                 ref={jobInputRef}
                 id="label-job"
-                className={`input${labelJob.trim() ? " input--filled" : scanAttempted ? " input--needs-entry" : ""}`}
-                placeholder={scanAttempted ? "Type job number" : "e.g. 111023"}
+                className="input"
+                placeholder="111023"
                 value={labelJob}
                 onChange={(e) => setLabelJob(e.target.value)}
                 inputMode="numeric"
@@ -477,12 +430,12 @@ export function ScanPage() {
               />
             </div>
             <div className="field">
-              <label htmlFor="label-fabric">Fabric type</label>
+              <label htmlFor="label-fabric">Fabric</label>
               <input
                 id="label-fabric"
                 ref={fabricInputRef}
-                className={`input${labelFabric.trim() ? " input--filled" : scanAttempted ? " input--needs-entry" : ""}`}
-                placeholder={scanAttempted ? "Type fabric" : "e.g. SOLID"}
+                className="input"
+                placeholder="SOLID"
                 value={labelFabric}
                 onChange={(e) => setLabelFabric(e.target.value)}
                 list="label-fabric-hints"
@@ -500,41 +453,39 @@ export function ScanPage() {
               <input
                 id="label-size"
                 ref={sizeInputRef}
-                className={`input${labelSize.trim() ? " input--filled" : scanAttempted ? " input--needs-entry" : ""}`}
-                placeholder={scanAttempted ? "Type size" : "e.g. 12' x 12'"}
+                className="input"
+                placeholder={"12' x 12'"}
                 value={labelSize}
                 onChange={(e) => setLabelSize(e.target.value)}
                 autoComplete="off"
               />
             </div>
-          </>
+          </div>
         )}
-        <button
-          type="button"
-          className="btn btn-secondary btn-block"
-          disabled={!canAddToLog}
-          onClick={addToLog}
-        >
-          Add to Log
-        </button>
-        {addToLogHint ? (
-          <p className="muted" style={{ margin: 0, fontSize: "0.85rem" }}>
-            {addToLogHint}
-          </p>
-        ) : null}
-        <button
-          type="button"
-          className="btn btn-primary btn-block"
-          disabled={!scanText}
-          onClick={() =>
-            goFabrics(mode === "qr" ? manual : labelDraft, mode === "qr" ? "qr" : "label")
-          }
-        >
-          Continue to Fabrics
-        </button>
+
+        <div className="scan-actions stack">
+          <button
+            type="button"
+            className="btn btn-primary btn-block"
+            disabled={!canAddToLog}
+            onClick={addToLog}
+          >
+            Add to Log
+          </button>
+          <button
+            type="button"
+            className="btn btn-secondary btn-block"
+            disabled={!scanText}
+            onClick={() =>
+              goFabrics(mode === "qr" ? manual : labelDraft, mode === "qr" ? "qr" : "label")
+            }
+          >
+            Continue to Fabrics
+          </button>
+        </div>
       </section>
 
-      <Link to="/dashboard" className="btn btn-secondary btn-block">
+      <Link to="/dashboard" className="scan-cancel muted">
         Cancel
       </Link>
     </div>
