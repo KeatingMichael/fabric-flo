@@ -88,7 +88,7 @@ Without this, in-app deletion still wipes production data via `fabric_flo_delete
 | Rental house name | `productions.settings.rentalHouseName` (migration `009`) |
 | Invite contact list | `productions.settings.inviteRecipients` (migration `009`) |
 | Scan method (QR / label / manual) | `scan_events.scan_method` (migration `009`) |
-| Handwritten label OCR (optional) | Edge Function `label-ocr` + `GOOGLE_VISION_API_KEY` — see [`docs/LABEL_OCR_SETUP.md`](LABEL_OCR_SETUP.md) |
+| Handwritten label OCR (optional) | Edge Function `label-ocr` + `OCR_SPACE_API_KEY` (free) or `GOOGLE_VISION_API_KEY` — see [`docs/LABEL_OCR_SETUP.md`](LABEL_OCR_SETUP.md) |
 | CSV inventory import | `fabric_flo_import_inventory_rows` |
 | Account deletion | `fabric_flo_delete_my_account` + optional Edge Function |
 
