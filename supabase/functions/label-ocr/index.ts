@@ -43,7 +43,7 @@ Deno.serve(async (req) => {
     const visionKey = Deno.env.get("GOOGLE_VISION_API_KEY")?.trim();
     const ocrSpaceKey = Deno.env.get("OCR_SPACE_API_KEY")?.trim();
     if (!visionKey && !ocrSpaceKey) {
-      return json({ error: "vision_not_configured" }, 501);
+      return json({ text: "", error: "vision_not_configured" });
     }
 
     const supabaseUrl = Deno.env.get("SUPABASE_URL")!;
@@ -78,9 +78,9 @@ Deno.serve(async (req) => {
       if (ocrSpaceText) return json({ text: ocrSpaceText, provider: "ocrspace" });
     }
 
-    return json({ error: "no_text_detected" }, 422);
+    return json({ text: "", error: "no_text_detected" });
   } catch (e) {
-    return json({ error: e instanceof Error ? e.message : "unknown" }, 500);
+    return json({ text: "", error: e instanceof Error ? e.message : "unknown" }, 500);
   }
 });
 
@@ -158,7 +158,10 @@ async function runOcrSpaceEngine(
   if (!res.ok) return null;
 
   const payload = (await res.json()) as OcrSpaceResponse;
-  if (payload.OCRExitCode !== 1) return null;
+  if (payload.OCRExitCode !== 1) {
+    console.warn("OCR.space engine", engine, payload.ErrorMessage ?? payload.OCRExitCode);
+    return null;
+  }
 
   const text = payload.ParsedResults?.[0]?.ParsedText?.trim() ?? "";
   return text || null;

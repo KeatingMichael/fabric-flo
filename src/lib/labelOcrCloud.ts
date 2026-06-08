@@ -11,7 +11,7 @@ import {
   parseRawTextToLabelFields,
   type LabelOcrFields,
 } from "@/lib/labelOcr";
-import { getSupabase } from "@/lib/supabase";
+import { FunctionsHttpError, getSupabase } from "@/lib/supabase";
 
 type LabelOcrResponse = {
   text?: string;
@@ -34,7 +34,7 @@ export type LabelOcrCloudOutcome = {
 
 export type LabelScanOutcome = LabelOcrCloudOutcome & { message: string };
 
-const CLOUD_OCR_TIMEOUT_MS = 10_000;
+const CLOUD_OCR_TIMEOUT_MS = 15_000;
 const SCAN_CLOUD_MAX_EDGE = 1600;
 const EMPTY_FIELDS: LabelOcrFields = { job: "", fabric: "", size: "" };
 
@@ -67,6 +67,37 @@ function isInvokeTransportError(error: unknown): boolean {
   );
 }
 
+async function readInvokePayload(
+  data: LabelOcrResponse | null | undefined,
+  error: unknown
+): Promise<LabelOcrResponse | null> {
+  if (data && (data.text !== undefined || data.error !== undefined)) {
+    return data;
+  }
+  if (error instanceof FunctionsHttpError) {
+    try {
+      return (await error.context.json()) as LabelOcrResponse;
+    } catch {
+      return null;
+    }
+  }
+  return data ?? null;
+}
+
+function outcomeFromPayload(payload: LabelOcrResponse | null): LabelOcrCloudOutcome {
+  if (!payload) {
+    return { fields: EMPTY_FIELDS, status: "error" };
+  }
+  if (payload.error === "vision_not_configured") {
+    return { fields: EMPTY_FIELDS, status: "error" };
+  }
+  if (payload.error === "no_text_detected" || !payload.text?.trim()) {
+    return { fields: EMPTY_FIELDS, status: "no_text" };
+  }
+  const fields = parseRawTextToLabelFields(payload.text);
+  return { fields, status: scoreFields(fields) };
+}
+
 /** Fast cloud-only label read for Scan — bundled here (no lazy chunk). */
 export async function scanLabelFromCapture(
   source: HTMLCanvasElement,
@@ -81,7 +112,7 @@ export async function scanLabelFromCapture(
   const outcome = await recognizeLabelFieldsCloudWithStatus(cloudDataUrl);
   return {
     ...outcome,
-    message: labelScanStatusMessage(outcome.status, outcome.fields),
+    message: labelScanStatusMessage(outcome.status),
   };
 }
 
@@ -142,14 +173,14 @@ async function recognizeLabelFieldsCloudInner(jpegDataUrl: string): Promise<Labe
       if (msg.includes("401") || msg.includes("not_authenticated")) {
         return { fields: EMPTY_FIELDS, status: "not_signed_in" };
       }
+      const fromError = await readInvokePayload(data, error);
+      if (fromError) return outcomeFromPayload(fromError);
       return { fields: EMPTY_FIELDS, status: "error" };
     }
-    if (data?.error === "vision_not_configured") return { fields: EMPTY_FIELDS, status: "error" };
-    if (!data?.text?.trim()) return { fields: EMPTY_FIELDS, status: "no_text" };
 
-    const fields = parseRawTextToLabelFields(data.text);
-    return { fields, status: scoreFields(fields) };
+    return outcomeFromPayload(data);
   } catch (e) {
+    console.warn("label-ocr exception:", e);
     if (isInvokeTransportError(e)) {
       return { fields: EMPTY_FIELDS, status: "error" };
     }
@@ -157,32 +188,21 @@ async function recognizeLabelFieldsCloudInner(jpegDataUrl: string): Promise<Labe
   }
 }
 
-export function labelScanStatusMessage(
-  status: LabelOcrCloudStatus,
-  fields: LabelOcrFields
-): string {
+export function labelScanStatusMessage(status: LabelOcrCloudStatus): string {
   switch (status) {
     case "offline":
       return "You're offline — type the label below.";
     case "not_signed_in":
       return "Sign in from Home for camera reading, or type below.";
     case "timeout":
-      return "That took too long. Try Scan again with the label filling the frame.";
+      return "That took too long. Hold steady and tap Scan again, or type below.";
     case "error":
-      return "Couldn't read the label. Refresh the page or type it below.";
+      return "Label reading isn't available right now — type the sticker below.";
     case "no_text":
-      return "No text spotted — brighter light helps, or type it below.";
-    case "partial": {
-      const parts = [fields.job, fields.fabric, fields.size].filter(Boolean);
-      return parts.length
-        ? `Got some of it — double-check the fields below.`
-        : "Almost — fill in the fields below.";
-    }
-    case "success": {
-      const parts = [fields.job, fields.fabric, fields.size].filter(Boolean);
-      return parts.length
-        ? `Nice — looks good. Tap Add to Log when ready.`
-        : "Check the fields below, then add to log.";
-    }
+      return "Couldn't make out text — hold closer, use good light, or type below.";
+    case "partial":
+      return "Got some of it — double-check the fields below.";
+    case "success":
+      return "Nice — looks good. Tap Add to Log when ready.";
   }
 }

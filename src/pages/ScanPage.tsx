@@ -166,6 +166,10 @@ export function ScanPage() {
     setLabelSize(outcome.fields.size);
     setScanStatus({ message: outcome.message, tone: toneForOutcome(outcome) });
 
+    if (outcome.status !== "success") {
+      setTypingMode(true);
+    }
+
     if (looksLikeWeakJobLine(outcome.fields.job)) focusFieldAfterScan.current = "job";
     else if (looksLikeWeakFabricLine(outcome.fields.fabric)) focusFieldAfterScan.current = "fabric";
     else if (looksLikeWeakSizeLine(outcome.fields.size)) focusFieldAfterScan.current = "size";
