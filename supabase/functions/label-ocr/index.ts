@@ -74,7 +74,7 @@ Deno.serve(async (req) => {
     }
 
     if (ocrSpaceKey) {
-      const ocrSpaceText = await runOcrSpace(ocrSpaceKey, imageBase64);
+      const ocrSpaceText = await runOcrSpaceCombined(ocrSpaceKey, imageBase64);
       if (ocrSpaceText) return json({ text: ocrSpaceText, provider: "ocrspace" });
     }
 
@@ -112,15 +112,29 @@ async function runGoogleVision(apiKey: string, imageBase64: string): Promise<str
   return text || null;
 }
 
-async function runOcrSpace(apiKey: string, imageBase64: string): Promise<string | null> {
+async function runOcrSpaceCombined(apiKey: string, imageBase64: string): Promise<string | null> {
   // OCR.space free tier: 1 MB per image (~1.37M base64 chars).
   if (imageBase64.length > 1_350_000) return null;
 
+  const chunks: string[] = [];
+  for (const engine of ["1", "2"]) {
+    const text = await runOcrSpaceEngine(apiKey, imageBase64, engine);
+    if (text) chunks.push(text);
+  }
+  const combined = [...new Set(chunks)].join("\n");
+  return combined || null;
+}
+
+async function runOcrSpaceEngine(
+  apiKey: string,
+  imageBase64: string,
+  engine: string
+): Promise<string | null> {
   const form = new URLSearchParams();
   form.set("apikey", apiKey);
   form.set("base64Image", `data:image/jpeg;base64,${imageBase64}`);
   form.set("language", "eng");
-  form.set("OCREngine", "2");
+  form.set("OCREngine", engine);
   form.set("isOverlayRequired", "false");
   form.set("detectOrientation", "true");
   form.set("scale", "true");

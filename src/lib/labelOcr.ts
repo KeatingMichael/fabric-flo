@@ -1141,15 +1141,66 @@ export async function recognizeLabelFieldsFromImage(
   canvas = autoCropLabelRegion(canvas);
   const dataUrl = jpegDataUrl ?? canvas.toDataURL("image/jpeg", 0.95);
 
+  const cloudDataUrl = shrinkJpegForCloud(canvas, dataUrl);
+
   if (typeof navigator !== "undefined" && navigator.onLine) {
     const { recognizeLabelFieldsCloud } = await import("@/lib/labelOcrCloud");
-    const cloud = await recognizeLabelFieldsCloud(dataUrl);
+    const cloud = await recognizeLabelFieldsCloud(cloudDataUrl);
     if (cloud && (cloud.job || cloud.fabric || cloud.size)) {
+      if (looksLikeWeakJobLine(cloud.job)) {
+        const localJob = await recognizeJobDigitsLocal(canvas);
+        if (localJob && !looksLikeWeakJobLine(localJob)) {
+          cloud.job = localJob;
+        }
+      }
       return cloud;
     }
   }
 
   return recognizeLabelFieldsLocal(canvas);
+}
+
+/** Keep cloud OCR images under OCR.space free-tier size limit (~1 MB). */
+function shrinkJpegForCloud(canvas: HTMLCanvasElement, preferred?: string): string {
+  const maxBase64 = 1_300_000;
+  const tryUrls = preferred ? [preferred] : [];
+  for (const q of [0.92, 0.85, 0.75, 0.65, 0.55]) {
+    tryUrls.push(canvas.toDataURL("image/jpeg", q));
+  }
+  for (const url of tryUrls) {
+    const base64 = url.replace(/^data:image\/\w+;base64,/, "");
+    if (base64.length <= maxBase64) return url;
+  }
+  return canvas.toDataURL("image/jpeg", 0.5);
+}
+
+/** Digit-only pass on the top sticker line (local Tesseract). */
+async function recognizeJobDigitsLocal(canvas: HTMLCanvasElement): Promise<string> {
+  const worker = await createWorker("eng", 1, { logger: () => {} });
+  try {
+    const jobBand = cropVerticalBand(canvas, 0, 0.4);
+    const candidates: string[] = [];
+    for (const variant of [
+      jobBand,
+      scaleCanvasWidth(jobBand, 2),
+      preprocessLabelBinarize(jobBand),
+      thickenBinary(preprocessLabelBinarize(jobBand)),
+      preprocessLabelContrast(jobBand),
+    ]) {
+      for (const psm of [PSM.SINGLE_LINE, PSM.SINGLE_WORD, PSM.RAW_LINE]) {
+        const digits = (await recognizeStripRaw(worker, variant, DIGIT_WHITELIST, psm)).replace(
+          /\D/g,
+          ""
+        );
+        if (digits.length >= 4) candidates.push(digits);
+      }
+      const ensemble = await ensembleDigitRead(worker, variant);
+      if (ensemble.length >= 4) candidates.push(ensemble);
+    }
+    return pickBestJobFromCandidates(candidates, candidates.join("\n"));
+  } finally {
+    await worker.terminate();
+  }
 }
 
 async function recognizeLabelFieldsLocal(canvas: HTMLCanvasElement): Promise<LabelOcrFields> {
@@ -1243,7 +1294,7 @@ export function parseRawTextToLabelFields(rawText: string): LabelOcrFields {
 
   if (lines.length >= 3) {
     return {
-      job: pickBestJobFromCandidates([lines[0]!], rawContext),
+      job: pickBestJobFromCandidates([lines[0]!, ...lines], rawContext),
       fabric: pickBestFabricFromCandidates([lines[1]!]),
       size: pickBestSizeFromCandidates([lines[2]!], rawContext),
     };
