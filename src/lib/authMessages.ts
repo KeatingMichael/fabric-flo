@@ -3,7 +3,7 @@ export function friendlyAuthError(message: string | null | undefined): string | 
   if (!message) return null;
   const lower = message.toLowerCase();
   if (lower.includes("invalid login credentials")) {
-    return "That email or password did not match. New here? Choose “Create my account” above, not Sign in.";
+    return "That email or password did not match. New here? Choose “New — create my account”. Returning? Tap Forgot password below.";
   }
   if (lower.includes("email not confirmed")) {
     return "Check your email for a confirmation link, then tap Sign in.";

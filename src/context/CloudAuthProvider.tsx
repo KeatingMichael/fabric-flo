@@ -76,14 +76,16 @@ export function CloudAuthProvider({ children }: { children: ReactNode }) {
   const signIn = useCallback(async (email: string, password: string) => {
     const sb = getSupabase();
     if (!sb) return { error: "Cloud is not configured." };
-    const { error } = await sb.auth.signInWithPassword({ email: email.trim(), password });
+    const { data, error } = await sb.auth.signInWithPassword({ email: email.trim(), password });
+    if (!error && data.session) setSession(data.session);
     return { error: error?.message ?? null };
   }, []);
 
   const signUp = useCallback(async (email: string, password: string) => {
     const sb = getSupabase();
     if (!sb) return { error: "Cloud is not configured." };
-    const { error } = await sb.auth.signUp({ email: email.trim(), password });
+    const { data, error } = await sb.auth.signUp({ email: email.trim(), password });
+    if (!error && data.session) setSession(data.session);
     return { error: error?.message ?? null };
   }, []);
 

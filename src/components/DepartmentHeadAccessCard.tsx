@@ -53,7 +53,7 @@ export function DepartmentHeadAccessCard({
       return;
     }
     if (configured) {
-      setMsg("Sign in under Fabric Flo account above first, then come back here.");
+      setMsg("Sign in under Fabric Flo account above first — same email and password — then tap this button again.");
       document.getElementById("cloud-account")?.scrollIntoView({ behavior: "auto", block: "start" });
       return;
     }
@@ -66,6 +66,11 @@ export function DepartmentHeadAccessCard({
       <p className="muted" style={{ marginBottom: 0 }}>
         Same sign-in as above. After you open your show, create Invite Codes on the dashboard and text them to crew.
       </p>
+      {!user && configured ? (
+        <p className="auth-feedback auth-feedback--info" style={{ marginBottom: 0 }}>
+          Step 1: sign in under <strong>Fabric Flo account</strong> above. Step 2: come back here and tap Continue.
+        </p>
+      ) : null}
       <form className="stack" onSubmit={(e) => void onContinue(e)}>
         {requireProductionName ? (
           <ProductionNameField
@@ -91,13 +96,17 @@ export function DepartmentHeadAccessCard({
           className="btn btn-primary btn-block"
           disabled={!email.trim() || (requireProductionName && !productionName.trim())}
         >
-          Continue
+          {user ? "Open my show" : "Continue"}
         </button>
       </form>
       <p className="muted" style={{ marginBottom: 0, fontSize: "0.82rem" }}>
         By continuing you agree to our <Link to="/terms">Terms</Link> and <Link to="/privacy">Privacy Policy</Link>.
       </p>
-      {msg ? <p className="muted" style={{ marginBottom: 0, fontSize: "0.88rem" }}>{msg}</p> : null}
+      {msg ? (
+        <p className="auth-feedback auth-feedback--error" role="alert" style={{ marginBottom: 0 }}>
+          {msg}
+        </p>
+      ) : null}
     </section>
   );
 }

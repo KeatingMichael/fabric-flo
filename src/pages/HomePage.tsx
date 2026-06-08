@@ -7,6 +7,7 @@ import { ProductionInviteSection } from "@/components/ProductionInviteSection";
 import { useCloudAuth } from "@/context/CloudAuthProvider";
 import { useApp } from "@/context/AppStore";
 import { ensureProductionByName } from "@/lib/ensureProduction";
+import { getSupabase } from "@/lib/supabase";
 
 export function HomePage() {
   const { productions, activeProductionId, setActiveProductionId, addProduction, deleteProduction } =
@@ -19,12 +20,14 @@ export function HomePage() {
   const needsProductionName = productions.length === 0;
 
   const ensureProduction = useCallback(async (): Promise<string | null> => {
+    const freshSession =
+      (await getSupabase()?.auth.getSession())?.data.session ?? session;
     try {
       return await ensureProductionByName({
         name: productionName,
         productions,
         activeProductionId,
-        session,
+        session: freshSession,
         addProduction,
         setActiveProductionId,
       });

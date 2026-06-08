@@ -51,7 +51,22 @@ export function CloudAccountCard({
   const [password, setPassword] = useState("");
   const [agreedLegal, setAgreedLegal] = useState(false);
   const [msg, setMsg] = useState<string | null>(null);
+  const [msgKind, setMsgKind] = useState<"error" | "success" | "info">("info");
   const [deleting, setDeleting] = useState(false);
+  const [authBusy, setAuthBusy] = useState(false);
+
+  function showMsg(text: string | null, kind: "error" | "success" | "info" = "info") {
+    setMsg(text);
+    setMsgKind(kind);
+    if (text) {
+      requestAnimationFrame(() => {
+        document.getElementById("cloud-account-feedback")?.scrollIntoView({
+          block: "nearest",
+          behavior: "auto",
+        });
+      });
+    }
+  }
 
   useEffect(() => {
     if (user) setAccountStep("email");
@@ -158,27 +173,32 @@ export function CloudAccountCard({
   async function onSignIn(e: FormEvent) {
     e.preventDefault();
     if (!agreedLegal) {
-      setMsg("Please agree to the Terms and Privacy Policy.");
+      showMsg("Please agree to the Terms and Privacy Policy.", "error");
       return;
     }
-    setMsg(null);
-    const { error } = await signIn(email, password);
-    if (error) {
-      setMsg(friendlyAuthError(error));
-      hapticWarning();
-      return;
-    }
-    if (onEnsureProduction) {
-      const id = await onEnsureProduction();
-      if (!id) {
-        setMsg("Enter your production name to continue.");
+    setAuthBusy(true);
+    showMsg(null);
+    try {
+      const { error } = await signIn(email, password);
+      if (error) {
+        showMsg(friendlyAuthError(error), "error");
         hapticWarning();
         return;
       }
+      if (onEnsureProduction) {
+        const id = await onEnsureProduction();
+        if (!id) {
+          showMsg("Enter your production name to continue.", "error");
+          hapticWarning();
+          return;
+        }
+      }
+      setPassword("");
+      hapticSuccess();
+      goHome();
+    } finally {
+      setAuthBusy(false);
     }
-    setPassword("");
-    hapticSuccess();
-    goHome();
   }
 
   async function onSignedInContinue() {
@@ -199,32 +219,42 @@ export function CloudAccountCard({
 
   async function onSignUp() {
     if (!agreedLegal) {
-      setMsg("Please agree to the Terms and Privacy Policy.");
+      showMsg("Please agree to the Terms and Privacy Policy.", "error");
       return;
     }
-    setMsg(null);
-    const { error } = await signUp(email, password);
-    if (error) {
-      setMsg(friendlyAuthError(error));
-      return;
-    }
-    const session = (await getSupabase()?.auth.getSession())?.data.session;
-    if (session) {
-      if (onEnsureProduction) {
-        const id = await onEnsureProduction();
-        if (!id) {
-          setMsg("Enter your production name to continue.");
-          return;
-        }
+    setAuthBusy(true);
+    showMsg(null);
+    try {
+      const { error } = await signUp(email, password);
+      if (error) {
+        showMsg(friendlyAuthError(error), "error");
+        hapticWarning();
+        return;
       }
-      setPassword("");
+      const session = (await getSupabase()?.auth.getSession())?.data.session;
+      if (session) {
+        if (onEnsureProduction) {
+          const id = await onEnsureProduction();
+          if (!id) {
+            showMsg("Enter your production name to continue.", "error");
+            hapticWarning();
+            return;
+          }
+        }
+        setPassword("");
+        hapticSuccess();
+        goHome();
+        return;
+      }
+      showMsg(
+        "Account created. Check your email if asked to confirm, then choose Returning and tap Sign in.",
+        "success"
+      );
       hapticSuccess();
-      goHome();
-      return;
+      setPasswordMode("signin");
+    } finally {
+      setAuthBusy(false);
     }
-    setMsg("Account created. Check your email if asked to confirm, then choose Sign in.");
-    hapticSuccess();
-    setPasswordMode("signin");
   }
 
   async function onForgotPassword() {
@@ -456,7 +486,7 @@ export function CloudAccountCard({
               checked={passwordMode === "signup"}
               onChange={() => {
                 setPasswordMode("signup");
-                setMsg(null);
+                showMsg(null);
               }}
             />
             <span>New — create my Fabric Flo account</span>
@@ -468,7 +498,7 @@ export function CloudAccountCard({
               checked={passwordMode === "signin"}
               onChange={() => {
                 setPasswordMode("signin");
-                setMsg(null);
+                showMsg(null);
               }}
             />
             <span>Returning — I already have a password</span>
@@ -500,10 +530,25 @@ export function CloudAccountCard({
         <button
           type="submit"
           className="btn btn-primary btn-block"
-          disabled={!password || !agreedLegal}
+          disabled={!password || !agreedLegal || authBusy}
         >
-          {passwordMode === "signup" ? "Create my account" : "Sign in"}
+          {authBusy
+            ? passwordMode === "signup"
+              ? "Creating account…"
+              : "Signing in…"
+            : passwordMode === "signup"
+              ? "Create my account"
+              : "Sign in"}
         </button>
+        {msg ? (
+          <p
+            id="cloud-account-feedback"
+            className={`auth-feedback auth-feedback--${msgKind}`}
+            role={msgKind === "error" ? "alert" : "status"}
+          >
+            {msg}
+          </p>
+        ) : null}
         {passwordMode === "signin" ? (
           <button type="button" className="btn btn-ghost btn-block" onClick={() => void onForgotPassword()}>
             Forgot password
@@ -515,13 +560,12 @@ export function CloudAccountCard({
           onClick={() => {
             setAccountStep("email");
             setPassword("");
-            setMsg(null);
+            showMsg(null);
           }}
         >
           Use a different email
         </button>
       </form>
-      {msg ? <p className="muted" style={{ marginBottom: 0 }}>{msg}</p> : null}
     </section>
   );
 }
