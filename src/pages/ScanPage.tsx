@@ -1,13 +1,31 @@
-import { useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { Link, useLocation, useNavigate } from "react-router-dom";
 import { ScanCameraPanel } from "@/components/ScanCameraPanel";
 import { isNativeApp } from "@/lib/native";
 import { hapticLight, hapticSuccess } from "@/lib/haptics";
-import { joinLabelFields } from "@/lib/labelOcr";
+import { joinLabelFields, looksLikeWeakJobLine } from "@/lib/labelOcr";
 import { readScanNavState } from "@/lib/scanNavigation";
 import type { ScanMethod } from "@/types";
 
 type ScanMode = "qr" | "label";
+
+const RENTAL_FABRIC_HINTS = [
+  "SOLID",
+  "DUVET",
+  "DUVETYNE",
+  "MUSLIN",
+  "VELVET",
+  "FOAM",
+  "BOUNCE",
+  "CHROMA",
+  "BLACK",
+  "WHITE",
+  "GRID",
+  "SILK",
+  "SATIN",
+  "SCRIM",
+  "NET",
+];
 
 export function ScanPage() {
   const navigate = useNavigate();
@@ -15,8 +33,10 @@ export function ScanPage() {
   const scanNav = readScanNavState(location.state);
   const lockedLocationId = scanNav.lockedLocationId;
   const lockedLocationLabel = scanNav.lockedLocationLabel;
+  const jobInputRef = useRef<HTMLInputElement>(null);
+  const focusJobAfterScan = useRef(false);
 
-  const [mode, setMode] = useState<ScanMode>("qr");
+  const [mode, setMode] = useState<ScanMode>("label");
   const [error, setError] = useState<string | null>(null);
   const [manual, setManual] = useState("");
   const [labelJob, setLabelJob] = useState("");
@@ -48,12 +68,29 @@ export function ScanPage() {
     goFabrics(text, "qr");
   }
 
+  useEffect(() => {
+    if (mode !== "label" || !focusJobAfterScan.current) return;
+    focusJobAfterScan.current = false;
+    jobInputRef.current?.focus();
+    jobInputRef.current?.select();
+  }, [labelJob, labelFabric, labelSize, mode]);
+
   return (
     <div className="page stack">
-      <h1>Scan</h1>
+      <h1>{mode === "label" ? "Scan rental label" : "Scan dynamic QR"}</h1>
       <p>
-        Use <strong>Dynamic QR code</strong> or <strong>Handwritten label</strong> with rental-house numbers on
-        gear today. Both can flow into the same log and inventory.
+        {mode === "label" ? (
+          <>
+            Most gear still uses a <strong>rental-house sticker</strong> — three lines: job number, fabric type,
+            and size. Center the white label in the camera, tap <strong>SCAN</strong>, then fix any line that
+            looks wrong.
+          </>
+        ) : (
+          <>
+            Use this when a piece has a Fabric Flo <strong>dynamic QR</strong> printed on it. Most inventory
+            today still uses handwritten rental labels instead.
+          </>
+        )}
         {isNativeApp() ? " Camera access is not recorded." : null}
       </p>
 
@@ -81,17 +118,6 @@ export function ScanPage() {
       <div className="row" style={{ width: "100%" }}>
         <button
           type="button"
-          className={`btn ${mode === "qr" ? "btn-primary" : "btn-secondary"}`}
-          style={{ flex: 1 }}
-          onClick={() => {
-            setError(null);
-            setMode("qr");
-          }}
-        >
-          Dynamic QR
-        </button>
-        <button
-          type="button"
           className={`btn ${mode === "label" ? "btn-primary" : "btn-secondary"}`}
           style={{ flex: 1 }}
           onClick={() => {
@@ -100,6 +126,17 @@ export function ScanPage() {
           }}
         >
           Handwritten label
+        </button>
+        <button
+          type="button"
+          className={`btn ${mode === "qr" ? "btn-primary" : "btn-secondary"}`}
+          style={{ flex: 1 }}
+          onClick={() => {
+            setError(null);
+            setMode("qr");
+          }}
+        >
+          Dynamic QR
         </button>
       </div>
 
@@ -111,6 +148,7 @@ export function ScanPage() {
           setLabelJob(fields.job);
           setLabelFabric(fields.fabric);
           setLabelSize(fields.size);
+          focusJobAfterScan.current = looksLikeWeakJobLine(fields.job);
         }}
         onError={setError}
       />
@@ -124,12 +162,12 @@ export function ScanPage() {
 
       <section className="card stack">
         <h2 style={{ marginTop: 0 }}>
-          {mode === "qr" ? "Paste QR value" : "Label text"}
+          {mode === "qr" ? "Paste QR value" : "Label lines"}
         </h2>
         <p style={{ marginBottom: 0 }}>
           {mode === "qr"
             ? "If the camera is unavailable, paste the QR JSON or code here."
-            : "Fill the frame with the white label only — then fix any line the camera got wrong."}
+            : "Tap SCAN again or edit any line before continuing."}
         </p>
         {mode === "qr" ? (
           <textarea
@@ -143,6 +181,7 @@ export function ScanPage() {
             <div className="field">
               <label htmlFor="label-job">Line 1 — job or sticker number</label>
               <input
+                ref={jobInputRef}
                 id="label-job"
                 className="input"
                 placeholder="e.g. 111023"
@@ -160,9 +199,15 @@ export function ScanPage() {
                 placeholder="e.g. SOLID"
                 value={labelFabric}
                 onChange={(e) => setLabelFabric(e.target.value)}
+                list="label-fabric-hints"
                 autoComplete="off"
                 autoCapitalize="characters"
               />
+              <datalist id="label-fabric-hints">
+                {RENTAL_FABRIC_HINTS.map((hint) => (
+                  <option key={hint} value={hint} />
+                ))}
+              </datalist>
             </div>
             <div className="field">
               <label htmlFor="label-size">Line 3 — size</label>

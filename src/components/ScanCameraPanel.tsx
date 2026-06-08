@@ -38,7 +38,11 @@ export function ScanCameraPanel({ mode, onQrDecoded, onLabelText, onLabelFields,
     void (async () => {
       try {
         stream = await navigator.mediaDevices.getUserMedia({
-          video: { facingMode: "environment" },
+          video: {
+            facingMode: { ideal: "environment" },
+            width: { ideal: 1920 },
+            height: { ideal: 1080 },
+          },
           audio: false,
         });
         if (cancelled) {
@@ -73,7 +77,8 @@ export function ScanCameraPanel({ mode, onQrDecoded, onLabelText, onLabelFields,
 
     try {
       const canvas = mode === "label" ? cropVideoFrameToGuide(video) : await captureVideoFrame(video);
-      setPreview(canvas.toDataURL("image/jpeg", 0.92));
+      const jpegDataUrl = canvas.toDataURL("image/jpeg", 0.97);
+      setPreview(jpegDataUrl);
 
       if (mode === "qr") {
         const text = await decodeQrFromCanvas(canvas);
@@ -86,9 +91,9 @@ export function ScanCameraPanel({ mode, onQrDecoded, onLabelText, onLabelFields,
         return;
       }
 
-      const fields = await recognizeLabelFieldsFromImage(canvas);
+      const fields = await recognizeLabelFieldsFromImage(canvas, jpegDataUrl);
       if (!fields.job && !fields.fabric && !fields.size) {
-        onError?.("No text detected — try brighter light, closer framing, or type the label below.");
+        onError?.("No text detected — fill the frame with the white label, add light, or type below.");
         return;
       }
       hapticSuccess();
@@ -104,17 +109,24 @@ export function ScanCameraPanel({ mode, onQrDecoded, onLabelText, onLabelFields,
   const hint =
     mode === "qr"
       ? "Center the dynamic QR in the frame, then tap SCAN."
-      : "Center the writing in the frame, then tap SCAN.";
+      : "Line up all three sticker lines inside the frame — white paper only, good light — then tap SCAN.";
 
   return (
     <div className="stack scan-camera">
-      <div className="scan-viewfinder">
+      <div className={`scan-viewfinder${mode === "label" ? " scan-viewfinder--label" : ""}`}>
         <video ref={videoRef} className="scan-viewfinder__video" playsInline muted />
         <div className="scan-viewfinder__guide" aria-hidden>
           <span className="scan-corner scan-corner--tl" />
           <span className="scan-corner scan-corner--tr" />
           <span className="scan-corner scan-corner--bl" />
           <span className="scan-corner scan-corner--br" />
+          {mode === "label" ? (
+            <>
+              <span className="scan-label-line scan-label-line--1" />
+              <span className="scan-label-line scan-label-line--2" />
+              <span className="scan-label-line scan-label-line--3" />
+            </>
+          ) : null}
         </div>
         <div className={`scan-viewfinder__flash${flash ? " scan-viewfinder__flash--on" : ""}`} aria-hidden />
         {!ready ? (
@@ -130,7 +142,7 @@ export function ScanCameraPanel({ mode, onQrDecoded, onLabelText, onLabelFields,
             void onScan();
           }}
         >
-          {busy ? "Scanning…" : "SCAN"}
+          {busy ? "Reading…" : "SCAN"}
         </button>
       </div>
       <p className="muted scan-camera__hint">{hint}</p>

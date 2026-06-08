@@ -1125,7 +1125,8 @@ function pickBestAttempt(attempts: OcrAttempt[]): string {
 
 /** Run OCR on a captured label photo; returns the three sticker lines separately. */
 export async function recognizeLabelFieldsFromImage(
-  source: HTMLCanvasElement | HTMLImageElement | string
+  source: HTMLCanvasElement | HTMLImageElement | string,
+  jpegDataUrl?: string
 ): Promise<LabelOcrFields> {
   let canvas: HTMLCanvasElement;
   if (typeof source === "string") {
@@ -1138,6 +1139,20 @@ export async function recognizeLabelFieldsFromImage(
   }
 
   canvas = autoCropLabelRegion(canvas);
+  const dataUrl = jpegDataUrl ?? canvas.toDataURL("image/jpeg", 0.95);
+
+  if (typeof navigator !== "undefined" && navigator.onLine) {
+    const { recognizeLabelFieldsCloud } = await import("@/lib/labelOcrCloud");
+    const cloud = await recognizeLabelFieldsCloud(dataUrl);
+    if (cloud && (cloud.job || cloud.fabric || cloud.size)) {
+      return cloud;
+    }
+  }
+
+  return recognizeLabelFieldsLocal(canvas);
+}
+
+async function recognizeLabelFieldsLocal(canvas: HTMLCanvasElement): Promise<LabelOcrFields> {
   const variants = buildLabelVariants(canvas);
   const worker = await createWorker("eng", 1, { logger: () => {} });
   const attempts: OcrAttempt[] = [];
@@ -1216,6 +1231,40 @@ export async function recognizeLabelFromImage(
 ): Promise<string> {
   const fields = await recognizeLabelFieldsFromImage(source);
   return joinLabelFields(fields.job, fields.fabric, fields.size);
+}
+
+/** Parse multi-line OCR (e.g. Google Vision) into sticker fields. */
+export function parseRawTextToLabelFields(rawText: string): LabelOcrFields {
+  const lines = rawText
+    .split(/\n/)
+    .map((line) => normalizeLine(line))
+    .filter(Boolean);
+  const rawContext = rawText;
+
+  if (lines.length >= 3) {
+    return {
+      job: pickBestJobFromCandidates([lines[0]!], rawContext),
+      fabric: pickBestFabricFromCandidates([lines[1]!]),
+      size: pickBestSizeFromCandidates([lines[2]!], rawContext),
+    };
+  }
+
+  if (lines.length === 2) {
+    const secondIsSize = Boolean(extractDimensions(lines[1]!) || /\d/.test(lines[1]!));
+    return {
+      job: pickBestJobFromCandidates([lines[0]!], rawContext),
+      fabric: secondIsSize ? "" : pickBestFabricFromCandidates([lines[1]!]),
+      size: secondIsSize ? pickBestSizeFromCandidates([lines[1]!], rawContext) : "",
+    };
+  }
+
+  const structured = extractLabelFields(rawContext);
+  return splitLabelIntoFields(structured || lines.join(" / "), rawContext);
+}
+
+/** True when line 1 probably still needs a human fix. */
+export function looksLikeWeakJobLine(job: string): boolean {
+  return job.replace(/\D/g, "").length < 4;
 }
 
 /** Split combined label OCR into the three common sticker lines. */

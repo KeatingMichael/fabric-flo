@@ -750,6 +750,27 @@ p {
   border-bottom-right-radius: 4px;
 }
 
+.scan-label-line {
+  position: absolute;
+  left: 0;
+  right: 0;
+  height: 1px;
+  background: rgba(56, 189, 248, 0.55);
+  box-shadow: 0 0 6px rgba(56, 189, 248, 0.35);
+}
+
+.scan-label-line--1 {
+  top: 22%;
+}
+
+.scan-label-line--2 {
+  top: 50%;
+}
+
+.scan-label-line--3 {
+  top: 78%;
+}
+
 .scan-viewfinder__loading {
   position: absolute;
   inset: 0;
