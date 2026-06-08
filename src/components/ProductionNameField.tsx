@@ -23,11 +23,7 @@ export function ProductionNameField({ id, value, onChange, optional }: Props) {
         <p className="muted" style={{ margin: "0.35rem 0 0", fontSize: "0.82rem" }}>
           Joining with a code? You can leave this blank.
         </p>
-      ) : (
-        <p className="muted" style={{ margin: "0.35rem 0 0", fontSize: "0.82rem" }}>
-          Working title or rental house job name.
-        </p>
-      )}
+      ) : null}
     </div>
   );
 }

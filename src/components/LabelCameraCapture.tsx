@@ -106,8 +106,8 @@ export function LabelCameraCapture({ onText, onError }: Props) {
         ) : null}
       </div>
       <p className="muted" style={{ margin: 0, fontSize: "0.85rem" }}>
-        Frame the handwritten sticker or rental-house number. Tap read, then fix any mistakes before
-        continuing.
+        Frame the sticker in good light — one label fills most of the screen. Tap read, then fix any
+        mistakes below before continuing.
       </p>
       <button
         type="button"
