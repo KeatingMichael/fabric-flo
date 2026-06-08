@@ -58,14 +58,6 @@ export function CloudAccountCard({
   function showMsg(text: string | null, kind: "error" | "success" | "info" = "info") {
     setMsg(text);
     setMsgKind(kind);
-    if (text) {
-      requestAnimationFrame(() => {
-        document.getElementById("cloud-account-feedback")?.scrollIntoView({
-          block: "nearest",
-          behavior: "auto",
-        });
-      });
-    }
   }
 
   useEffect(() => {

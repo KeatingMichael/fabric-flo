@@ -54,7 +54,6 @@ export function DepartmentHeadAccessCard({
     }
     if (configured) {
       setMsg("Sign in under Fabric Flo account above first — same email and password — then tap this button again.");
-      document.getElementById("cloud-account")?.scrollIntoView({ behavior: "auto", block: "start" });
       return;
     }
     navigate("/dashboard");

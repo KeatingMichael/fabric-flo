@@ -27,41 +27,41 @@
 
 html {
   scroll-behavior: auto;
-  height: 100%;
+  -webkit-text-size-adjust: 100%;
 }
 
 html,
 body {
   margin: 0;
-  height: 100%;
+  min-height: 100%;
   background: var(--bg);
   color: var(--text);
   font-family: var(--font);
   font-size: 17px;
   line-height: 1.45;
   -webkit-tap-highlight-color: transparent;
-  overflow: hidden;
+  overflow-x: hidden;
+  overscroll-behavior-y: none;
+  touch-action: manipulation;
 }
 
 #root {
-  height: 100%;
+  min-height: 100%;
 }
 
 .app-shell {
-  height: 100%;
+  min-height: 100%;
   display: flex;
   flex-direction: column;
-  overflow: hidden;
 }
 
 .app-main {
   flex: 1;
-  min-height: 0;
   width: 100%;
-  overflow-x: hidden;
-  overflow-y: auto;
-  overscroll-behavior-y: contain;
-  -webkit-overflow-scrolling: touch;
+}
+
+.app-main--with-nav {
+  padding-bottom: calc(4.75rem + var(--safe-bottom));
 }
 
 a {
@@ -254,6 +254,9 @@ p {
   border-radius: var(--radius-sm);
   padding: 0.65rem 0.75rem;
   min-height: 48px;
+  font-size: 16px;
+  scroll-margin-top: 1rem;
+  scroll-margin-bottom: 1rem;
 }
 
 .textarea {
@@ -794,6 +797,11 @@ p {
 }
 
 .app-bottom-nav {
+  position: fixed;
+  left: 0;
+  right: 0;
+  bottom: 0;
+  z-index: 30;
   flex-shrink: 0;
   padding-bottom: calc(0.5rem + var(--safe-bottom));
   padding-top: 0.35rem;

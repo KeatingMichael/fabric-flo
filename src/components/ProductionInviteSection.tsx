@@ -91,7 +91,6 @@ export function ProductionInviteSection({
       } else {
         setMsg("Invite Codes need cloud sign-in. Use Fabric Flo account above first.");
       }
-      document.getElementById("cloud-account")?.scrollIntoView({ behavior: "auto", block: "start" });
       return;
     }
 
@@ -103,7 +102,6 @@ export function ProductionInviteSection({
     }
 
     setMsg("Sign in under Fabric Flo account above with this email, then tap Continue here again.");
-    document.getElementById("cloud-account")?.scrollIntoView({ behavior: "auto", block: "start" });
   }
 
   if (user) {

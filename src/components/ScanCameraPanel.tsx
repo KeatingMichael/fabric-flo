@@ -1,6 +1,6 @@
 import { useEffect, useRef, useState } from "react";
 import { hapticLight } from "@/lib/haptics";
-import { recognizeLabelFromImage } from "@/lib/labelOcr";
+import { cropVideoFrameToGuide, recognizeLabelFromImage } from "@/lib/labelOcr";
 import { captureVideoFrame, decodeQrFromCanvas } from "@/lib/scanQrFromImage";
 
 type ScanMode = "qr" | "label";
@@ -60,7 +60,7 @@ export function ScanCameraPanel({ mode, onQrDecoded, onLabelText, onError }: Pro
     onError?.(null);
 
     try {
-      const canvas = await captureVideoFrame(video);
+      const canvas = mode === "label" ? cropVideoFrameToGuide(video) : await captureVideoFrame(video);
       setPreview(canvas.toDataURL("image/jpeg", 0.92));
 
       if (mode === "qr") {
@@ -91,7 +91,7 @@ export function ScanCameraPanel({ mode, onQrDecoded, onLabelText, onError }: Pro
   const hint =
     mode === "qr"
       ? "Center the dynamic QR in the frame, then tap SCAN."
-      : "Center the handwritten sticker in the frame, then tap SCAN.";
+      : "Center the writing in the frame, then tap SCAN.";
 
   return (
     <div className="stack scan-camera">

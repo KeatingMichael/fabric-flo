@@ -36,7 +36,7 @@ export function InventoryNameField({
   function onSelectChange(next: string) {
     if (next === CUSTOM) {
       onChange("");
-      requestAnimationFrame(() => inputRef.current?.focus());
+      requestAnimationFrame(() => inputRef.current?.focus({ preventScroll: true }));
       return;
     }
     onChange(next);
