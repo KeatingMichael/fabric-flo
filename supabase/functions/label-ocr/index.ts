@@ -113,16 +113,12 @@ async function runGoogleVision(apiKey: string, imageBase64: string): Promise<str
 }
 
 async function runOcrSpaceCombined(apiKey: string, imageBase64: string): Promise<string | null> {
-  // OCR.space free tier: 1 MB per image (~1.37M base64 chars).
   if (imageBase64.length > 1_350_000) return null;
 
-  const chunks: string[] = [];
-  for (const engine of ["1", "2"]) {
-    const text = await runOcrSpaceEngine(apiKey, imageBase64, engine);
-    if (text) chunks.push(text);
-  }
-  const combined = [...new Set(chunks)].join("\n");
-  return combined || null;
+  const engine2 = await runOcrSpaceEngine(apiKey, imageBase64, "2");
+  if (engine2) return engine2;
+
+  return await runOcrSpaceEngine(apiKey, imageBase64, "1");
 }
 
 async function runOcrSpaceEngine(

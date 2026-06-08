@@ -482,16 +482,19 @@ function cropVerticalBand(
   return out;
 }
 
+function isPlausibleJobDigits(digits: string): boolean {
+  if (digits.length < 4 || digits.length > 8) return false;
+  const unique = new Set(digits).size;
+  if (digits.length >= 6 && unique <= 2) return false;
+  if (/^(\d{1,4})\1{2,}/.test(digits)) return false;
+  return true;
+}
+
 function extractBestJobNumber(text: string): string | null {
   const normalized = text.replace(/[Oo]/g, "0").replace(/[Il|]/g, "1");
-  const runs = normalized.match(/\d+/g) ?? [];
-  const sorted = [...runs].sort((a, b) => b.length - a.length);
-  for (const run of sorted) {
-    if (run.length >= 5 && run.length <= 8) return run;
-  }
-  for (const run of sorted) {
-    if (run.length >= 4 && run.length <= 8) return run;
-  }
+  const runs = (normalized.match(/\d+/g) ?? []).filter(isPlausibleJobDigits);
+  runs.sort((a, b) => scoreJobDigits(b) - scoreJobDigits(a));
+  if (runs[0]) return runs[0];
   return lettersToJobDigits(text);
 }
 
@@ -535,6 +538,9 @@ function repairJobLine(line: string): string {
 function repairFabricLine(line: string): string {
   let trimmed = normalizeLine(line).replace(/^\d+\s+/, "");
   const upper = trimmed.toUpperCase();
+  if (/^[A-Z][A-Z0-9' ./-]{2,}$/.test(upper) && upper.includes(" ") && upper.length >= 6) {
+    return upper.replace(/\s+/g, " ").trim();
+  }
   const keyword = extractFabricKeyword(upper);
   if (keyword) return keyword;
   const compact = upper.replace(/[^A-Z]/g, "");
@@ -546,6 +552,11 @@ function repairFabricLine(line: string): string {
   return trimmed;
 }
 
+function repairSizeLineStrict(line: string): string {
+  const trimmed = normalizeLine(line);
+  return extractDimensions(trimmed) ?? trimmed;
+}
+
 function repairSizeLine(line: string, rawContext = ""): string {
   const trimmed = normalizeLine(line);
   let direct = extractDimensions(trimmed);
@@ -555,11 +566,9 @@ function repairSizeLine(line: string, rawContext = ""): string {
       const ctxSize = extractDimensions(rawContext);
       if (ctxSize) {
         const ctxMatched = ctxSize.match(/^(\d+)' X (\d+)'$/);
+        if (ctxMatched && ctxMatched[1] !== ctxMatched[2]) return ctxSize;
         if (ctxMatched && ctxMatched[1]!.length >= 2) return ctxSize;
       }
-      if (/\b12\b/.test(rawContext)) return "12' X 12'";
-      if (/\b20\b/.test(rawContext)) return "20' X 20'";
-      if (/\b8\b/.test(rawContext)) return "8' X 8'";
     }
     return direct;
   }
@@ -780,8 +789,8 @@ async function ensembleDigitRead(worker: Worker, strip: HTMLCanvasElement): Prom
     const digits = (await recognizeStripRaw(worker, variant, DIGIT_WHITELIST)).replace(/\D/g, "");
     if (digits.length >= 3) results.push(digits);
   }
-  results.sort((a, b) => b.length - a.length);
-  return results[0] ?? "";
+  results.sort((a, b) => scoreJobDigits(b) - scoreJobDigits(a));
+  return results.find((r) => isPlausibleJobDigits(r)) ?? "";
 }
 
 async function recognizeStripRaw(
@@ -826,7 +835,7 @@ function scoreFabricCandidate(text: string): number {
 }
 
 function scoreJobDigits(digits: string): number {
-  if (digits.length < 4) return 0;
+  if (!isPlausibleJobDigits(digits)) return 0;
   let score = digits.length * 12;
   if (digits.length >= 5 && digits.length <= 6) score += 25;
   if (digits.length === 4) score += 8;
@@ -837,9 +846,9 @@ function scoreSizeCandidate(size: string): number {
   const matched = size.match(/^(\d+)' X (\d+)'$/);
   if (!matched) return scoreReadableLine(size);
   let score = 30;
-  if (matched[1] === matched[2]) score += 25;
-  if (matched[1]!.length >= 2) score += 20;
-  if (Number(matched[1]) >= 6) score += 10;
+  if (matched[1] !== matched[2]) score += 20;
+  if (matched[1] === matched[2]) score += 10;
+  if (matched[1]!.length >= 2) score += 10;
   return score;
 }
 
@@ -847,12 +856,12 @@ function pickBestJobFromCandidates(candidates: string[], rawContext: string): st
   const digitRuns: string[] = [];
   for (const candidate of candidates) {
     const digits = candidate.replace(/\D/g, "");
-    if (digits.length >= 4) digitRuns.push(digits);
+    if (isPlausibleJobDigits(digits)) digitRuns.push(digits);
     const fromLetters = lettersToJobDigits(candidate);
-    if (fromLetters) digitRuns.push(fromLetters);
+    if (fromLetters && isPlausibleJobDigits(fromLetters)) digitRuns.push(fromLetters);
   }
   const fromContext = extractBestJobNumber(rawContext);
-  if (fromContext) digitRuns.push(fromContext);
+  if (fromContext && isPlausibleJobDigits(fromContext)) digitRuns.push(fromContext);
 
   if (digitRuns.length) {
     digitRuns.sort((a, b) => scoreJobDigits(b) - scoreJobDigits(a));
@@ -860,7 +869,10 @@ function pickBestJobFromCandidates(candidates: string[], rawContext: string): st
   }
 
   const labelReads = candidates.map(repairJobLine).filter(Boolean);
-  labelReads.sort((a, b) => b.replace(/\D/g, "").length - a.replace(/\D/g, "").length);
+  for (const read of labelReads) {
+    const digits = read.replace(/\D/g, "");
+    if (isPlausibleJobDigits(digits)) return digits;
+  }
   return labelReads[0] ?? "";
 }
 
@@ -914,7 +926,7 @@ async function readBandDigits(worker: Worker, band: HTMLCanvasElement): Promise<
     for (const psm of [PSM.SINGLE_LINE, PSM.SINGLE_WORD, PSM.RAW_LINE]) {
       const text = await recognizeStripRaw(worker, variant, DIGIT_WHITELIST, psm);
       const digits = text.replace(/\D/g, "");
-      if (digits.length >= 3) results.push(digits);
+      if (isPlausibleJobDigits(digits)) results.push(digits);
     }
     const ensemble = await ensembleDigitRead(worker, variant);
     if (ensemble.length >= 3) results.push(ensemble);
@@ -1149,8 +1161,8 @@ export async function recognizeLabelFieldsFromImage(
     if (cloud && (cloud.job || cloud.fabric || cloud.size)) {
       if (looksLikeWeakJobLine(cloud.job)) {
         const localJob = await recognizeJobDigitsLocal(canvas);
-        if (localJob && !looksLikeWeakJobLine(localJob)) {
-          cloud.job = localJob;
+        if (localJob && isPlausibleJobDigits(localJob.replace(/\D/g, ""))) {
+          cloud.job = localJob.replace(/\D/g, "");
         }
       }
       return cloud;
@@ -1294,9 +1306,9 @@ export function parseRawTextToLabelFields(rawText: string): LabelOcrFields {
 
   if (lines.length >= 3) {
     return {
-      job: pickBestJobFromCandidates([lines[0]!, ...lines], rawContext),
-      fabric: pickBestFabricFromCandidates([lines[1]!]),
-      size: pickBestSizeFromCandidates([lines[2]!], rawContext),
+      job: pickBestJobFromCandidates([lines[0]!], lines[0]!),
+      fabric: repairFabricLine(lines[1]!),
+      size: repairSizeLineStrict(lines[2]!),
     };
   }
 
