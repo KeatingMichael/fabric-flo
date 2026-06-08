@@ -1,4 +1,4 @@
-/** iPhone/PWA scroll stability: hide chrome while typing, avoid layout jumps. */
+/** Hide fixed tab bar while the keyboard is open (iPhone Safari). */
 export function initIosScrollFix(): () => void {
   const root = document.documentElement;
   let blurTimer: ReturnType<typeof setTimeout> | null = null;
@@ -25,23 +25,12 @@ export function initIosScrollFix(): () => void {
     }, 120);
   };
 
-  const onViewportResize = () => {
-    const vv = window.visualViewport;
-    if (!vv) return;
-    const keyboardOpen = vv.height < window.innerHeight * 0.82;
-    if (!keyboardOpen && !isField(document.activeElement)) {
-      setKeyboardOpen(false);
-    }
-  };
-
   document.addEventListener("focusin", onFocusIn);
   document.addEventListener("focusout", onFocusOut);
-  window.visualViewport?.addEventListener("resize", onViewportResize);
 
   return () => {
     document.removeEventListener("focusin", onFocusIn);
     document.removeEventListener("focusout", onFocusOut);
-    window.visualViewport?.removeEventListener("resize", onViewportResize);
     if (blurTimer) clearTimeout(blurTimer);
     setKeyboardOpen(false);
   };

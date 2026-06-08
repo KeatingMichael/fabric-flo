@@ -4,7 +4,7 @@ import { FabricFloBrandHeader } from "@/components/FabricFloBrandHeader";
 import { LegalFooter } from "@/components/LegalFooter";
 import { SyncStatusBanner } from "@/components/SyncStatusBanner";
 import { useActiveProduction } from "@/context/AppStore";
-import { ScrollMainProvider, useScrollMain } from "@/context/ScrollMainContext";
+import { ScrollMainProvider } from "@/context/ScrollMainContext";
 import { hapticSelection } from "@/lib/haptics";
 
 const nav = [
@@ -26,7 +26,6 @@ export function Layout({ children }: { children: ReactNode }) {
 function LayoutShell({ children }: { children: ReactNode }) {
   const location = useLocation();
   const production = useActiveProduction();
-  const { mainRef } = useScrollMain();
   const noNavPaths = ["/", "/app", "/help", "/privacy", "/terms", "/launch", "/licenses"];
   const showNav =
     production && !noNavPaths.includes(location.pathname) && location.pathname !== "/assign";
@@ -36,7 +35,7 @@ function LayoutShell({ children }: { children: ReactNode }) {
     <div className="app-shell">
       <FabricFloBrandHeader />
       <SyncStatusBanner />
-      <main ref={mainRef} className="app-main">
+      <main className={`app-main${showNav ? " app-main--with-nav" : ""}`}>
         {children}
         {showLegalFooter ? <LegalFooter /> : null}
       </main>

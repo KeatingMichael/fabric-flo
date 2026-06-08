@@ -28,44 +28,44 @@
 html {
   scroll-behavior: auto;
   -webkit-text-size-adjust: 100%;
-  height: 100%;
-  overflow: hidden;
+  overflow-anchor: none;
 }
 
 html,
 body {
   margin: 0;
-  height: 100%;
+  min-height: 100%;
   background: var(--bg);
   color: var(--text);
   font-family: var(--font);
   font-size: 17px;
   line-height: 1.45;
   -webkit-tap-highlight-color: transparent;
-  overflow: hidden;
+  overflow-x: hidden;
   touch-action: manipulation;
 }
 
 #root {
-  height: 100%;
+  min-height: 100%;
 }
 
 .app-shell {
-  height: 100%;
+  min-height: 100%;
   display: flex;
   flex-direction: column;
-  overflow: hidden;
 }
 
 .app-main {
-  flex: 1;
-  min-height: 0;
+  flex: 1 0 auto;
   width: 100%;
-  overflow-x: hidden;
-  overflow-y: auto;
-  overflow-anchor: none;
-  overscroll-behavior-y: contain;
-  -webkit-overflow-scrolling: touch;
+}
+
+.app-main--with-nav {
+  padding-bottom: calc(4.75rem + var(--safe-bottom));
+}
+
+.ios-keyboard-open .app-main--with-nav {
+  padding-bottom: calc(1rem + var(--safe-bottom));
 }
 
 .ios-keyboard-open .app-bottom-nav {
@@ -126,7 +126,7 @@ p {
 }
 
 .page {
-  padding: 1rem;
+  padding: 1rem 1rem calc(1.25rem + var(--safe-bottom));
   max-width: 560px;
   margin: 0 auto;
 }
@@ -803,8 +803,12 @@ p {
 }
 
 .app-bottom-nav {
+  position: fixed;
+  left: 0;
+  right: 0;
+  bottom: 0;
+  z-index: 30;
   flex-shrink: 0;
-  z-index: 10;
   padding-bottom: calc(0.5rem + var(--safe-bottom));
   padding-top: 0.35rem;
   background: var(--bg);
