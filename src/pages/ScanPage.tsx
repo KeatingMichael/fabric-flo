@@ -50,6 +50,7 @@ export function ScanPage() {
   const jobInputRef = useRef<HTMLInputElement>(null);
   const fabricInputRef = useRef<HTMLInputElement>(null);
   const sizeInputRef = useRef<HTMLInputElement>(null);
+  const quickLocNameRef = useRef<HTMLInputElement>(null);
   const focusFieldAfterScan = useRef<"job" | "fabric" | "size" | null>(null);
 
   const [mode, setMode] = useState<ScanMode>("label");
@@ -139,7 +140,13 @@ export function ScanPage() {
     setLabelJob(outcome.fields.job);
     setLabelFabric(outcome.fields.fabric);
     setLabelSize(outcome.fields.size);
-    setHint(outcome.message);
+    const hasFields = Boolean(outcome.fields.job || outcome.fields.fabric || outcome.fields.size);
+    if (hasFields && production && production.locations.length === 0) {
+      setHint("Label read — add a place above, then Add to Log.");
+      window.setTimeout(() => quickLocNameRef.current?.focus(), 120);
+    } else {
+      setHint(outcome.message);
+    }
 
     if (looksLikeWeakJobLine(outcome.fields.job)) focusFieldAfterScan.current = "job";
     else if (looksLikeWeakFabricLine(outcome.fields.fabric)) focusFieldAfterScan.current = "fabric";
@@ -147,11 +154,21 @@ export function ScanPage() {
     else if (!outcome.fields.job) focusFieldAfterScan.current = "job";
   }
 
+  function focusPlacePicker() {
+    if (isLocationLocked) return;
+    if (!hasPlaces) {
+      quickLocNameRef.current?.focus();
+      return;
+    }
+    document.getElementById("scan-log-loc")?.focus();
+  }
+
   function addToLog() {
     if (!production || !scanText) return;
     const loc = production.locations.find((l) => l.id === locId);
     if (!loc) {
-      setHint("Pick a place first.");
+      setHint(hasPlaces ? "Pick a place above." : "Add a place above first.");
+      focusPlacePicker();
       return;
     }
 
@@ -224,7 +241,7 @@ export function ScanPage() {
   }
 
   const hasPlaces = production.locations.length > 0;
-  const canAddToLog = Boolean(scanText && locId && hasPlaces);
+  const scanContentReady = Boolean(scanText);
   const statusLine = cameraError ?? hint;
 
   return (
@@ -306,8 +323,8 @@ export function ScanPage() {
 
         <button
           type="button"
-          className={`btn btn-block scan-cta${canAddToLog ? " scan-cta--ready" : ""}`}
-          disabled={!canAddToLog}
+          className={`btn btn-block scan-cta${scanContentReady ? " scan-cta--ready" : ""}`}
+          disabled={!scanContentReady}
           onClick={addToLog}
         >
           Add to Log
@@ -377,6 +394,7 @@ export function ScanPage() {
             </select>
             <input
               id="scan-quick-loc-name"
+              ref={quickLocNameRef}
               className="input"
               placeholder="Place name"
               value={quickLocName}
