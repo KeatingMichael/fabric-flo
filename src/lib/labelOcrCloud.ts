@@ -163,26 +163,26 @@ export function labelScanStatusMessage(
 ): string {
   switch (status) {
     case "offline":
-      return "You're offline. Type the label in the fields below.";
+      return "You're offline — type the label below.";
     case "not_signed_in":
-      return "Sign in from Home to use camera label reading, or type the label below.";
+      return "Sign in from Home for camera reading, or type below.";
     case "timeout":
-      return "Reading timed out. Fill the frame with the white label only, then tap SCAN again — or type below.";
+      return "That took too long. Try Scan again with the label filling the frame.";
     case "error":
-      return "Could not reach label reading. Pull down to refresh the page, then try SCAN again — or type below.";
+      return "Couldn't read the label. Refresh the page or type it below.";
     case "no_text":
-      return "No text found. Use good light, white paper only in frame, or type the label below.";
+      return "No text spotted — brighter light helps, or type it below.";
     case "partial": {
       const parts = [fields.job, fields.fabric, fields.size].filter(Boolean);
       return parts.length
-        ? `Partial read: ${parts.join(" · ")}. Fix any field below.`
-        : "Partial read — fill in the fields below.";
+        ? `Got some of it — double-check the fields below.`
+        : "Almost — fill in the fields below.";
     }
     case "success": {
       const parts = [fields.job, fields.fabric, fields.size].filter(Boolean);
       return parts.length
-        ? `Read: ${parts.join(" · ")}. Fix below if anything looks off.`
-        : "Label read — check the fields below.";
+        ? `Nice — looks good. Tap Add to Log when ready.`
+        : "Check the fields below, then add to log.";
     }
   }
 }
