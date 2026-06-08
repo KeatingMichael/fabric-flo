@@ -6,6 +6,20 @@ const DIGIT_WHITELIST = "0123456789";
 const LETTER_WHITELIST = "ABCDEFGHIJKLMNOPQRSTUVWXYZ ";
 const SIZE_WHITELIST = "0123456789Xx'\" ";
 
+const SOLID_ALIASES = new Set([
+  "OB",
+  "OOB",
+  "OOL",
+  "SOUD",
+  "SOID",
+  "SOLD",
+  "S0LID",
+  "SO0D",
+  "5OLID",
+  "SOL1D",
+  "SOLID",
+]);
+
 const FABRIC_KEYWORDS = [
   "SOLID",
   "DUVET",
@@ -251,7 +265,7 @@ export function preprocessLabelCanvas(source: HTMLCanvasElement): HTMLCanvasElem
 }
 
 function applyTonePipeline(source: HTMLCanvasElement, tone: ToneAdjust): HTMLCanvasElement {
-  const scaled = scaleCanvas(source, 2800);
+  const scaled = scaleCanvas(source, 4000);
   const canvas = cloneCanvas(scaled);
   const ctx = canvas.getContext("2d");
   if (!ctx) return scaled;
@@ -291,7 +305,7 @@ function applyTonePipeline(source: HTMLCanvasElement, tone: ToneAdjust): HTMLCan
 }
 
 function buildLabelVariants(source: HTMLCanvasElement): HTMLCanvasElement[] {
-  const scaled = scaleCanvas(source, 2800);
+  const scaled = scaleCanvas(source, 4000);
   const dark = averageLuminance(scaled) < 95;
   const variants = [
     preprocessLabelBinarize(source),
@@ -340,6 +354,97 @@ function scoreReadableLine(line: string): number {
   if (/^\d{3,}$/.test(trimmed.replace(/\s/g, ""))) score += 18;
   if (/^[A-Za-z]{3,}$/.test(trimmed.replace(/\s/g, ""))) score += 12;
   return score;
+}
+
+function findInkLineBands(source: HTMLCanvasElement): { y: number; h: number }[] {
+  const prepped = preprocessLabelBinarize(source);
+  const ctx = prepped.getContext("2d");
+  if (!ctx) return [];
+  const { data, width, height } = ctx.getImageData(0, 0, prepped.width, prepped.height);
+  const rowInk = new Uint32Array(height);
+  for (let y = 0; y < height; y++) {
+    let count = 0;
+    for (let x = 0; x < width; x++) {
+      if (data[(y * width + x) * 4]! < 128) count++;
+    }
+    rowInk[y] = count;
+  }
+
+  const minInk = Math.max(4, Math.floor(width * 0.008));
+  const raw: { start: number; end: number }[] = [];
+  let inBand = false;
+  let start = 0;
+  for (let y = 0; y < height; y++) {
+    if (rowInk[y]! >= minInk) {
+      if (!inBand) {
+        inBand = true;
+        start = y;
+      }
+    } else if (inBand) {
+      inBand = false;
+      if (y - start >= Math.max(10, height * 0.035)) raw.push({ start, end: y });
+    }
+  }
+  if (inBand && height - start >= 10) raw.push({ start, end: height });
+
+  const merged: { start: number; end: number }[] = [];
+  for (const band of raw) {
+    const last = merged[merged.length - 1];
+    if (last && band.start - last.end < height * 0.035) {
+      last.end = band.end;
+    } else {
+      merged.push({ ...band });
+    }
+  }
+
+  return merged
+    .sort((a, b) => b.end - b.start - (a.end - a.start))
+    .slice(0, 4)
+    .sort((a, b) => a.start - b.start)
+    .map((band) => ({
+      y: Math.max(0, band.start - Math.round(height * 0.02)),
+      h: Math.min(
+        height - band.start,
+        band.end - band.start + Math.round(height * 0.04)
+      ),
+    }));
+}
+
+function cropInkBand(source: HTMLCanvasElement, band: { y: number; h: number }): HTMLCanvasElement {
+  const out = document.createElement("canvas");
+  out.width = source.width;
+  out.height = Math.max(1, band.h);
+  const ctx = out.getContext("2d");
+  if (!ctx) return source;
+  ctx.fillStyle = "#fff";
+  ctx.fillRect(0, 0, out.width, out.height);
+  ctx.drawImage(source, 0, band.y, source.width, band.h, 0, 0, out.width, out.height);
+  return out;
+}
+
+function thickenBinary(source: HTMLCanvasElement): HTMLCanvasElement {
+  const canvas = cloneCanvas(source);
+  const ctx = canvas.getContext("2d");
+  if (!ctx) return source;
+  const imageData = ctx.getImageData(0, 0, canvas.width, canvas.height);
+  const { data, width, height } = imageData;
+  const src = new Uint8ClampedArray(data);
+  for (let y = 1; y < height - 1; y++) {
+    for (let x = 1; x < width - 1; x++) {
+      const i = (y * width + x) * 4;
+      if (src[i]! >= 128) continue;
+      for (let dy = -1; dy <= 1; dy++) {
+        for (let dx = -1; dx <= 1; dx++) {
+          const j = ((y + dy) * width + (x + dx)) * 4;
+          data[j] = 0;
+          data[j + 1] = 0;
+          data[j + 2] = 0;
+        }
+      }
+    }
+  }
+  ctx.putImageData(imageData, 0, 0);
+  return canvas;
 }
 
 function cropVerticalBand(
@@ -412,10 +517,11 @@ function repairFabricLine(line: string): string {
   const keyword = extractFabricKeyword(upper);
   if (keyword) return keyword;
   const compact = upper.replace(/[^A-Z]/g, "");
+  if (SOLID_ALIASES.has(compact)) return "SOLID";
   for (const kw of FABRIC_KEYWORDS) {
     if (levenshtein(compact, kw) <= 3) return kw;
   }
-  if (/^O+L+$|^SO?L+$|^SOU?D$|^S0LID$/i.test(compact)) return "SOLID";
+  if (/^O+L+$|^SO?L+$|^SOU?D$|^S0LID$|^OB$|^OOB$/i.test(compact)) return "SOLID";
   return trimmed;
 }
 
@@ -469,7 +575,12 @@ function extractDimensions(text: string): string | null {
   const normalized = text.replace(/[×]/g, "X").replace(/[''´`]/g, "'");
   const direct = normalized.match(/(\d{1,3})\s*'?\s*[xX]\s*'?\s*(\d{1,3})/);
   if (direct) {
-    return `${direct[1]}' X ${direct[2]}'`;
+    const a = direct[1]!;
+    const b = direct[2]!;
+    if (a.length === 1 && b.length === 2 && Number(b) >= 8) {
+      return `${b}' X ${b}'`;
+    }
+    return `${a}' X ${b}'`;
   }
   const spaced = normalized.match(/\b(\d{1,2})\s+(\d{1,2})\b/);
   if (spaced) {
@@ -490,6 +601,9 @@ function scoreLabelText(text: string): number {
   }
   if (parts.length >= 2) score += 15;
   if (parts.length >= 3) score += 10;
+  for (const part of parts) {
+    if (part.length === 2 && !FABRIC_KEYWORDS.includes(part.toUpperCase())) score -= 25;
+  }
   const noiseWords = parts.join(" ").match(/\b[A-Za-z]{2,3}\b/g) ?? [];
   score -= noiseWords.length * 8;
   return score;
@@ -514,6 +628,23 @@ export function extractLabelFields(raw: string): string {
 
 function repairLabelParts(lines: string[], rawContext = ""): string {
   if (!lines.length && !rawContext) return "";
+
+  if (lines.length >= 3) {
+    return [
+      repairJobLine(lines[0]!),
+      repairFabricLine(lines[1]!),
+      repairSizeLine(lines[2]!),
+    ].join(" / ");
+  }
+
+  if (lines.length === 2) {
+    const secondIsSize = Boolean(extractDimensions(lines[1]!) || /\d/.test(lines[1]!));
+    if (secondIsSize) {
+      return [repairJobLine(lines[0]!), repairSizeLine(lines[1]!)].join(" / ");
+    }
+    return [repairJobLine(lines[0]!), repairFabricLine(lines[1]!)].join(" / ");
+  }
+
   const context = `${rawContext}\n${lines.join("\n")}`;
   const tokens: string[] = [];
 
@@ -603,6 +734,22 @@ function splitIntoStrips(source: HTMLCanvasElement, count: number): HTMLCanvasEl
   return strips;
 }
 
+async function ensembleDigitRead(worker: Worker, strip: HTMLCanvasElement): Promise<string> {
+  const variants = [
+    preprocessLabelBinarize(strip),
+    thickenBinary(preprocessLabelBinarize(strip)),
+    preprocessLabelContrast(strip),
+    preprocessLabelBinarize(strip, true),
+  ];
+  const results: string[] = [];
+  for (const variant of variants) {
+    const digits = (await recognizeStripRaw(worker, variant, DIGIT_WHITELIST)).replace(/\D/g, "");
+    if (digits.length >= 3) results.push(digits);
+  }
+  results.sort((a, b) => b.length - a.length);
+  return results[0] ?? "";
+}
+
 async function recognizeStripRaw(
   worker: Worker,
   source: HTMLCanvasElement,
@@ -627,6 +774,11 @@ async function ocrStripLine(
   total: number
 ): Promise<string> {
   const candidates: string[] = [await recognizeStripRaw(worker, strip, LABEL_CHAR_WHITELIST)];
+
+  if (index === 0) {
+    const ensemble = await ensembleDigitRead(worker, strip);
+    if (ensemble.length >= 4) candidates.push(ensemble);
+  }
 
   if (index === 0) {
     const digits = (await recognizeStripRaw(worker, strip, DIGIT_WHITELIST)).replace(/\D/g, "");
@@ -701,7 +853,11 @@ async function runStripOcr(
   processed: HTMLCanvasElement,
   stripCount: number
 ): Promise<OcrAttempt> {
-  const strips = splitIntoStrips(processed, stripCount);
+  const bands = findInkLineBands(processed);
+  const strips =
+    bands.length >= 2
+      ? bands.map((band) => cropInkBand(processed, band))
+      : splitIntoStrips(processed, stripCount);
   const lines: string[] = [];
 
   for (let i = 0; i < strips.length; i++) {
@@ -758,12 +914,16 @@ export async function recognizeLabelFromImage(
 
   try {
     const jobBand = cropVerticalBand(canvas, 0, 0.38);
-    for (const variant of [preprocessLabelBinarize(jobBand), preprocessLabelContrast(jobBand)]) {
+    for (const variant of [
+      preprocessLabelBinarize(jobBand),
+      thickenBinary(preprocessLabelBinarize(jobBand)),
+      preprocessLabelContrast(jobBand),
+    ]) {
       const digits = (await recognizeStripRaw(worker, variant, DIGIT_WHITELIST)).replace(/\D/g, "");
       rawChunks.push(digits);
       if (digits.length >= 5) {
         attempts.push({
-          text: repairLabelParts([], digits),
+          text: repairLabelParts([digits], digits) || digits,
           confidence: 80,
           labelScore: scoreLabelText(digits),
         });
@@ -776,14 +936,8 @@ export async function recognizeLabelFromImage(
       rawChunks.push(strip3.text);
 
       if (strip3.labelScore >= 95) {
-        return pickBestAttempt([
-          ...attempts,
-          {
-            text: repairLabelParts(strip3.text.split("/").map((p) => p.trim()), rawChunks.join("\n")),
-            confidence: 85,
-            labelScore: scoreLabelText(repairLabelParts(strip3.text.split("/").map((p) => p.trim()), rawChunks.join("\n"))),
-          },
-        ]);
+        const parts = strip3.text.split("/").map((p) => p.trim()).filter(Boolean);
+        return repairLabelParts(parts, rawChunks.join("\n")) || pickBestAttempt(attempts);
       }
 
       const block = await runOcrPass(worker, variant, PSM.SINGLE_BLOCK);
@@ -806,10 +960,38 @@ export async function recognizeLabelFromImage(
       labelScore: Math.max(scoreLabelText(structuredFromAll), scoreLabelText(mergedFromRaw)),
     });
 
-    return pickBestAttempt(attempts);
+    const best = pickBestAttempt(attempts);
+    const parts = best.split("/").map((p) => p.trim()).filter(Boolean);
+    const repaired = repairLabelParts(parts, rawChunks.join("\n"));
+    return repaired || best;
   } finally {
     await worker.terminate();
   }
+}
+
+/** Split combined label OCR into the three common sticker lines. */
+export function splitLabelIntoFields(text: string): { job: string; fabric: string; size: string } {
+  const parts = text.split("/").map((p) => p.trim()).filter(Boolean);
+  if (parts.length >= 3) {
+    return {
+      job: repairJobLine(parts[0]!),
+      fabric: repairFabricLine(parts[1]!),
+      size: repairSizeLine(parts[2]!),
+    };
+  }
+  const jobFromContext = extractBestJobNumber(text);
+  return {
+    job: jobFromContext ?? repairJobLine(parts[0] ?? ""),
+    fabric: repairFabricLine(parts[1] ?? ""),
+    size: repairSizeLine(parts[2] ?? parts.slice(2).join(" / ")),
+  };
+}
+
+export function joinLabelFields(job: string, fabric: string, size: string): string {
+  return [job, fabric, size]
+    .map((part) => part.trim())
+    .filter(Boolean)
+    .join(" / ");
 }
 
 function loadImage(src: string): Promise<HTMLImageElement> {

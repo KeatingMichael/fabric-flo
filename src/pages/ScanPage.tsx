@@ -3,6 +3,7 @@ import { Link, useLocation, useNavigate } from "react-router-dom";
 import { ScanCameraPanel } from "@/components/ScanCameraPanel";
 import { isNativeApp } from "@/lib/native";
 import { hapticLight, hapticSuccess } from "@/lib/haptics";
+import { joinLabelFields, splitLabelIntoFields } from "@/lib/labelOcr";
 import { readScanNavState } from "@/lib/scanNavigation";
 import type { ScanMethod } from "@/types";
 
@@ -18,7 +19,11 @@ export function ScanPage() {
   const [mode, setMode] = useState<ScanMode>("qr");
   const [error, setError] = useState<string | null>(null);
   const [manual, setManual] = useState("");
-  const [labelDraft, setLabelDraft] = useState("");
+  const [labelJob, setLabelJob] = useState("");
+  const [labelFabric, setLabelFabric] = useState("");
+  const [labelSize, setLabelSize] = useState("");
+
+  const labelDraft = joinLabelFields(labelJob, labelFabric, labelSize);
 
   function goFabrics(raw: string, scanMethod: ScanMethod) {
     const t = raw.trim();
@@ -103,7 +108,10 @@ export function ScanPage() {
         onQrDecoded={onQrDecoded}
         onLabelText={(text) => {
           setError(null);
-          setLabelDraft(text);
+          const fields = splitLabelIntoFields(text);
+          setLabelJob(fields.job);
+          setLabelFabric(fields.fabric);
+          setLabelSize(fields.size);
         }}
         onError={setError}
       />
@@ -122,20 +130,54 @@ export function ScanPage() {
         <p style={{ marginBottom: 0 }}>
           {mode === "qr"
             ? "If the camera is unavailable, paste the QR JSON or code here."
-            : "Correct OCR mistakes, or type what is written on the case."}
+            : "Three lines like most rental stickers — fix any line the camera got wrong."}
         </p>
-        <textarea
-          className="textarea"
-          placeholder={
-            mode === "qr"
-              ? "Paste dynamic QR JSON…"
-              : 'e.g. 1247, A-12, BLUE VEL 12x12…'
-          }
-          value={mode === "qr" ? manual : labelDraft}
-          onChange={(e) =>
-            mode === "qr" ? setManual(e.target.value) : setLabelDraft(e.target.value)
-          }
-        />
+        {mode === "qr" ? (
+          <textarea
+            className="textarea"
+            placeholder="Paste dynamic QR JSON…"
+            value={manual}
+            onChange={(e) => setManual(e.target.value)}
+          />
+        ) : (
+          <>
+            <div className="field">
+              <label htmlFor="label-job">Line 1 — job or sticker number</label>
+              <input
+                id="label-job"
+                className="input"
+                placeholder="e.g. 111023"
+                value={labelJob}
+                onChange={(e) => setLabelJob(e.target.value)}
+                inputMode="numeric"
+                autoComplete="off"
+              />
+            </div>
+            <div className="field">
+              <label htmlFor="label-fabric">Line 2 — fabric type</label>
+              <input
+                id="label-fabric"
+                className="input"
+                placeholder="e.g. SOLID"
+                value={labelFabric}
+                onChange={(e) => setLabelFabric(e.target.value)}
+                autoComplete="off"
+                autoCapitalize="characters"
+              />
+            </div>
+            <div className="field">
+              <label htmlFor="label-size">Line 3 — size</label>
+              <input
+                id="label-size"
+                className="input"
+                placeholder={"e.g. 12' x 12'"}
+                value={labelSize}
+                onChange={(e) => setLabelSize(e.target.value)}
+                autoComplete="off"
+              />
+            </div>
+          </>
+        )}
         <button
           type="button"
           className="btn btn-primary btn-block"
