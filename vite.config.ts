@@ -76,9 +76,8 @@ export default defineConfig({
   build: {
     rollupOptions: {
       output: {
-        /** Keep scan/cloud OCR in the main bundle — lazy chunks 404 under the PWA shell. */
+        /** Only split pdf — tesseract loads lazily for offline OCR, not on Scan. */
         manualChunks(id) {
-          if (id.includes("node_modules/tesseract.js")) return "tesseract";
           if (id.includes("node_modules/pdfjs-dist")) return "pdf";
           return undefined;
         },

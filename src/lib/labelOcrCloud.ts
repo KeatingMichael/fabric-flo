@@ -1,12 +1,14 @@
 import {
   autoCropLabelRegion,
+  preprocessLabelContrast,
+  scaleCanvas,
+  shrinkJpegForCloud,
+} from "@/lib/labelOcrImage";
+import {
   looksLikeWeakFabricLine,
   looksLikeWeakJobLine,
   looksLikeWeakSizeLine,
   parseRawTextToLabelFields,
-  preprocessLabelContrast,
-  scaleCanvas,
-  shrinkJpegForCloud,
   type LabelOcrFields,
 } from "@/lib/labelOcr";
 import { getSupabase } from "@/lib/supabase";

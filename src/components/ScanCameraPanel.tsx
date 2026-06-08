@@ -1,7 +1,7 @@
 import { useEffect, useRef, useState } from "react";
 import { playCameraShutter } from "@/lib/cameraFeedback";
 import { hapticCameraCapture, hapticSuccess } from "@/lib/haptics";
-import { cropVideoFrameToGuide } from "@/lib/labelOcr";
+import { cropVideoFrameToGuide } from "@/lib/labelOcrImage";
 import {
   scanLabelFromCapture,
   type LabelScanOutcome,
