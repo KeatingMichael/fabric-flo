@@ -230,11 +230,11 @@ export function ScanPage() {
   return (
     <div className="page stack scan-page">
       <header className="scan-page__header">
-        <h1>Log a piece</h1>
+        <h1>Scan</h1>
         <p className="scan-page__lead">
           {mode === "label"
-            ? "Type the three sticker lines — or tap Scan to try auto-fill."
-            : "Scan the dynamic QR, or paste it below."}
+            ? "Fill the frame with the white sticker, tap Scan — job, fabric, and size fill in below."
+            : "Center the dynamic QR and tap Scan."}
         </p>
       </header>
 
@@ -281,16 +281,28 @@ export function ScanPage() {
         </button>
       </div>
 
+      <ScanCameraPanel
+        mode={mode}
+        onQrDecoded={onQrDecoded}
+        onLabelFields={(fields) => {
+          setLabelJob(fields.job);
+          setLabelFabric(fields.fabric);
+          setLabelSize(fields.size);
+        }}
+        onLabelScan={onLabelScan}
+        onCameraError={setCameraError}
+      />
+
+      {statusLine ? (
+        <p className={`scan-status scan-status--${cameraError ? "warn" : "ok"}`} role="status">
+          {statusLine}
+        </p>
+      ) : null}
+
       <section className="card stack scan-sheet">
         {renderPlacePicker()}
 
         {mode === "label" ? renderLabelFields() : renderQrField()}
-
-        {statusLine ? (
-          <p className={`scan-status scan-status--${cameraError ? "warn" : "ok"}`} role="status">
-            {statusLine}
-          </p>
-        ) : null}
 
         <button
           type="button"
@@ -313,18 +325,6 @@ export function ScanPage() {
           </button>
         ) : null}
       </section>
-
-      <ScanCameraPanel
-        mode={mode}
-        onQrDecoded={onQrDecoded}
-        onLabelFields={(fields) => {
-          setLabelJob(fields.job);
-          setLabelFabric(fields.fabric);
-          setLabelSize(fields.size);
-        }}
-        onLabelScan={onLabelScan}
-        onCameraError={setCameraError}
-      />
 
       <Link to="/dashboard" className="scan-cancel muted">
         Cancel
@@ -433,6 +433,7 @@ export function ScanPage() {
   function renderLabelFields() {
     return (
       <div className="scan-label-fields">
+        <p className="scan-field-hint muted">Filled by Scan — tap to fix</p>
         <div className="field">
           <label htmlFor="label-job">Job #</label>
           <input

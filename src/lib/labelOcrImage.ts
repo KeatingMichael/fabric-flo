@@ -276,6 +276,34 @@ function applyTonePipeline(source: HTMLCanvasElement, tone: ToneAdjust): HTMLCan
   return canvas;
 }
 
+/** Crop a horizontal band — rental labels use top/middle/bottom lines. */
+export function cropVerticalBand(
+  source: HTMLCanvasElement,
+  yStartFraction: number,
+  heightFraction: number
+): HTMLCanvasElement {
+  const y = Math.max(0, Math.round(source.height * yStartFraction));
+  const h = Math.max(1, Math.round(source.height * heightFraction));
+  const out = document.createElement("canvas");
+  out.width = source.width;
+  out.height = Math.min(h, source.height - y);
+  const ctx = out.getContext("2d");
+  if (!ctx) return source;
+  ctx.fillStyle = "#fff";
+  ctx.fillRect(0, 0, out.width, out.height);
+  ctx.drawImage(source, 0, y, source.width, out.height, 0, 0, out.width, out.height);
+  return out;
+}
+
+/** Standard three-band split for rental-house sticker layout. */
+export function rentalLabelStrips(source: HTMLCanvasElement): [HTMLCanvasElement, HTMLCanvasElement, HTMLCanvasElement] {
+  return [
+    cropVerticalBand(source, 0.04, 0.30),
+    cropVerticalBand(source, 0.32, 0.36),
+    cropVerticalBand(source, 0.62, 0.36),
+  ];
+}
+
 /** Keep cloud OCR images under OCR.space free-tier size limit (~1 MB). */
 export function shrinkJpegForCloud(canvas: HTMLCanvasElement, preferred?: string): string {
   const maxBase64 = 1_300_000;

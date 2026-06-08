@@ -1014,6 +1014,19 @@ p {
   background: #020617;
 }
 
+.scan-viewfinder--label {
+  min-height: 280px;
+}
+
+.scan-viewfinder--label .scan-viewfinder__video {
+  min-height: 280px;
+}
+
+.scan-field-hint {
+  margin: 0 0 0.35rem;
+  font-size: 0.85rem;
+}
+
 .scan-viewfinder__video {
   width: 100%;
   display: block;

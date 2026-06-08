@@ -29,6 +29,11 @@ type OcrSpaceResponse = {
   ParsedResults?: Array<{ ParsedText?: string }>;
 };
 
+type LabelOcrBody = {
+  imageBase64?: string;
+  stripsBase64?: string[];
+};
+
 Deno.serve(async (req) => {
   if (req.method === "OPTIONS") {
     return new Response("ok", { headers: cors });
@@ -59,7 +64,7 @@ Deno.serve(async (req) => {
       return json({ error: "not_authenticated" }, 401);
     }
 
-    const body = (await req.json()) as { imageBase64?: string };
+    const body = (await req.json()) as LabelOcrBody;
     const imageBase64 = body.imageBase64?.trim();
     if (!imageBase64 || imageBase64.length < 32) {
       return json({ error: "missing_image" }, 400);
@@ -68,13 +73,15 @@ Deno.serve(async (req) => {
       return json({ error: "image_too_large" }, 413);
     }
 
+    const strips = body.stripsBase64?.filter((s) => s && s.length > 32) ?? [];
+
     if (visionKey) {
       const googleText = await runGoogleVision(visionKey, imageBase64);
-      if (googleText) return json({ text: googleText, provider: "google" });
+      if (googleText) return json({ text: googleText, rawText: googleText, provider: "google" });
     }
 
     if (ocrSpaceKey) {
-      const ocrSpaceText = await runOcrSpaceCombined(ocrSpaceKey, imageBase64);
+      const ocrSpaceText = await runOcrSpaceCombined(ocrSpaceKey, imageBase64, strips);
       if (ocrSpaceText) {
         return json({ text: ocrSpaceText, rawText: ocrSpaceText, provider: "ocrspace" });
       }
@@ -114,13 +121,33 @@ async function runGoogleVision(apiKey: string, imageBase64: string): Promise<str
   return text || null;
 }
 
-async function runOcrSpaceCombined(apiKey: string, imageBase64: string): Promise<string | null> {
-  if (imageBase64.length > 1_350_000) return null;
+async function runOcrSpaceCombined(
+  apiKey: string,
+  imageBase64: string,
+  stripsBase64: string[]
+): Promise<string | null> {
+  if (imageBase64.length > 1_350_000 && !stripsBase64.length) return null;
 
-  const results = await Promise.all(
+  const chunks: string[] = [];
+
+  if (stripsBase64.length >= 3) {
+    const stripTexts = await Promise.all(
+      stripsBase64.slice(0, 3).map((strip) => runOcrSpaceEngine(apiKey, strip, "2"))
+    );
+    const ordered = stripTexts.map((t) => t?.trim() ?? "").filter(Boolean);
+    if (ordered.length >= 2) {
+      return ordered.join("\n");
+    }
+    chunks.push(...ordered);
+  }
+
+  const fullResults = await Promise.all(
     (["2", "1"] as const).map((engine) => runOcrSpaceEngine(apiKey, imageBase64, engine))
   );
-  const chunks = results.filter((text): text is string => Boolean(text));
+  for (const text of fullResults) {
+    if (text) chunks.push(text);
+  }
+
   if (!chunks.length) return null;
   return mergeOcrTexts(chunks);
 }
@@ -141,6 +168,8 @@ async function runOcrSpaceEngine(
   imageBase64: string,
   engine: string
 ): Promise<string | null> {
+  if (imageBase64.length > 1_350_000) return null;
+
   const form = new URLSearchParams();
   form.set("apikey", apiKey);
   form.set("base64Image", `data:image/jpeg;base64,${imageBase64}`);
@@ -149,6 +178,7 @@ async function runOcrSpaceEngine(
   form.set("isOverlayRequired", "false");
   form.set("detectOrientation", "true");
   form.set("scale", "true");
+  form.set("isTable", "false");
 
   const res = await fetch("https://api.ocr.space/parse", {
     method: "POST",
@@ -164,7 +194,8 @@ async function runOcrSpaceEngine(
     return null;
   }
 
-  const text = payload.ParsedResults?.map((r) => r.ParsedText?.trim() ?? "").filter(Boolean).join("\n") ?? "";
+  const text =
+    payload.ParsedResults?.map((r) => r.ParsedText?.trim() ?? "").filter(Boolean).join("\n") ?? "";
   return text || null;
 }
 

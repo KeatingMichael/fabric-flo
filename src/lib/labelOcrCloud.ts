@@ -1,4 +1,8 @@
-import { autoCropLabelRegion, scaleCanvas, shrinkJpegForCloud } from "@/lib/labelOcrImage";
+import {
+  autoCropLabelRegion,
+  scaleCanvas,
+  shrinkJpegForCloud,
+} from "@/lib/labelOcrImage";
 import {
   looksLikeWeakFabricLine,
   looksLikeWeakJobLine,
@@ -9,7 +13,8 @@ import {
 import {
   hasAnyLabelField,
   mergeLabelFields,
-  quickLocalLabelRead,
+  readLabelOnPhone,
+  stripBase64Payload,
 } from "@/lib/labelOcrQuick";
 import { FunctionsHttpError, getSupabase } from "@/lib/supabase";
 
@@ -17,6 +22,11 @@ type LabelOcrResponse = {
   text?: string;
   error?: string;
   rawText?: string;
+};
+
+type LabelOcrRequest = {
+  imageBase64: string;
+  stripsBase64?: string[];
 };
 
 export type LabelOcrCloudStatus =
@@ -37,8 +47,8 @@ export type LabelScanOutcome = LabelOcrCloudOutcome & { message: string };
 
 export type ScanReadPhase = "cloud" | "phone";
 
-const CLOUD_OCR_TIMEOUT_MS = 12_000;
-const SCAN_CLOUD_MAX_EDGE = 2400;
+const CLOUD_OCR_TIMEOUT_MS = 14_000;
+const SCAN_CLOUD_MAX_EDGE = 2600;
 const EMPTY_FIELDS: LabelOcrFields = { job: "", fabric: "", size: "" };
 
 function withTimeout<T>(promise: Promise<T>, ms: number, fallback: T): Promise<T> {
@@ -107,38 +117,43 @@ function outcomeFromPayload(payload: LabelOcrResponse | null): LabelOcrCloudOutc
   return { fields, status: scoreFields(fields) };
 }
 
-function prepareCloudJpeg(source: HTMLCanvasElement, jpegDataUrl?: string): string {
+function prepareCloudRequest(
+  source: HTMLCanvasElement,
+  jpegDataUrl?: string
+): LabelOcrRequest {
   const cropped = autoCropLabelRegion(source);
   const scaled = scaleCanvas(cropped, SCAN_CLOUD_MAX_EDGE);
-  return shrinkJpegForCloud(scaled, jpegDataUrl);
+  const imageBase64 = shrinkJpegForCloud(scaled, jpegDataUrl).replace(/^data:image\/\w+;base64,/, "");
+  const stripsBase64 = stripBase64Payload(scaled);
+  return { imageBase64, stripsBase64 };
 }
 
-/** Cloud + on-phone fallback label read for Scan. */
+function mergeOutcomes(cloud: LabelOcrCloudOutcome, phone: LabelOcrFields): LabelOcrCloudOutcome {
+  const fields = mergeLabelFields(cloud.fields, phone);
+  if (!hasAnyLabelField(fields)) {
+    return { fields: EMPTY_FIELDS, status: cloud.status === "not_signed_in" ? "not_signed_in" : "no_text" };
+  }
+  return { fields, status: scoreFields(fields) };
+}
+
+/** Cloud + on-phone label read in parallel — core Scan path. */
 export async function scanLabelFromCapture(
   source: HTMLCanvasElement,
   jpegDataUrl?: string,
   onPhase?: (phase: ScanReadPhase) => void
 ): Promise<LabelScanOutcome> {
   const cropped = autoCropLabelRegion(source);
-  const cloudDataUrl = prepareCloudJpeg(source, jpegDataUrl);
+  const request = prepareCloudRequest(source, jpegDataUrl);
 
   onPhase?.("cloud");
-  let outcome = await recognizeLabelFieldsCloudWithStatus(cloudDataUrl);
+  onPhase?.("phone");
 
-  const needsFallback =
-    outcome.status === "no_text" ||
-    outcome.status === "error" ||
-    outcome.status === "timeout" ||
-    (outcome.status === "partial" && !outcome.fields.job);
+  const [cloudOutcome, phoneFields] = await Promise.all([
+    recognizeLabelFieldsCloudWithStatus(request),
+    readLabelOnPhone(cropped),
+  ]);
 
-  if (needsFallback && navigator.onLine) {
-    onPhase?.("phone");
-    const local = await quickLocalLabelRead(cropped);
-    if (local && hasAnyLabelField(local)) {
-      const merged = mergeLabelFields(outcome.fields, local);
-      outcome = { fields: merged, status: scoreFields(merged) };
-    }
-  }
+  const outcome = mergeOutcomes(cloudOutcome, phoneFields);
 
   return {
     ...outcome,
@@ -147,18 +162,19 @@ export async function scanLabelFromCapture(
 }
 
 export async function recognizeLabelFieldsCloudWithStatus(
-  jpegDataUrl: string
+  request: LabelOcrRequest | string
 ): Promise<LabelOcrCloudOutcome> {
   if (!navigator.onLine) {
     return { fields: EMPTY_FIELDS, status: "offline" };
   }
-  return withTimeout(recognizeLabelFieldsCloudInner(jpegDataUrl), CLOUD_OCR_TIMEOUT_MS, {
+  const payload = typeof request === "string" ? { imageBase64: request.replace(/^data:image\/\w+;base64,/, "") } : request;
+  return withTimeout(recognizeLabelFieldsCloudInner(payload), CLOUD_OCR_TIMEOUT_MS, {
     fields: EMPTY_FIELDS,
     status: "timeout",
   });
 }
 
-async function recognizeLabelFieldsCloudInner(jpegDataUrl: string): Promise<LabelOcrCloudOutcome> {
+async function recognizeLabelFieldsCloudInner(request: LabelOcrRequest): Promise<LabelOcrCloudOutcome> {
   const sb = getSupabase();
   if (!sb) {
     return { fields: EMPTY_FIELDS, status: "error" };
@@ -173,14 +189,13 @@ async function recognizeLabelFieldsCloudInner(jpegDataUrl: string): Promise<Labe
 
   await sb.auth.refreshSession();
 
-  const base64 = jpegDataUrl.replace(/^data:image\/\w+;base64,/, "");
-  if (!base64) {
+  if (!request.imageBase64) {
     return { fields: EMPTY_FIELDS, status: "error" };
   }
 
   try {
     const { data, error } = await sb.functions.invoke<LabelOcrResponse>("label-ocr", {
-      body: { imageBase64: base64 },
+      body: request,
     });
 
     if (error) {
@@ -210,18 +225,18 @@ async function recognizeLabelFieldsCloudInner(jpegDataUrl: string): Promise<Labe
 export function labelScanStatusMessage(status: LabelOcrCloudStatus): string {
   switch (status) {
     case "offline":
-      return "Offline — type the three lines from the sticker.";
+      return "Offline — phone read only. Fix fields below if needed.";
     case "not_signed_in":
-      return "Sign in from Home to use camera fill-in, or type below.";
+      return "Sign in from Home for cloud read — phone read may still fill fields.";
     case "timeout":
-      return "Slow connection — type the sticker below.";
+      return "Slow connection — check the fields below.";
     case "error":
-      return "Camera fill-in missed — type the sticker below.";
+      return "Cloud missed — phone read may have filled fields. Tap to fix.";
     case "no_text":
-      return "Couldn't read it — type job, fabric, and size below.";
+      return "Couldn’t read the sticker — hold the white label in frame and Scan again.";
     case "partial":
-      return "Filled what we could — check the three fields.";
+      return "Got some lines — fix any field below, then Add to Log.";
     case "success":
-      return "Filled from sticker — tap Add to Log.";
+      return "Label read — pick a place and Add to Log.";
   }
 }

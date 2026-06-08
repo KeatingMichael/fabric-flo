@@ -89,6 +89,9 @@ export function ScanCameraPanel({
 
     try {
       const canvas = mode === "label" ? cropVideoFrameToGuide(video) : await captureVideoFrame(video);
+      if (mode === "label") {
+        await new Promise((r) => window.setTimeout(r, 350));
+      }
       const jpegDataUrl = canvas.toDataURL("image/jpeg", 0.95);
 
       if (mode === "qr") {
@@ -129,11 +132,12 @@ export function ScanCameraPanel({
   }
 
   const readingLabel =
-    readPhase === "phone" ? "Reading on phone…" : readPhase === "cloud" ? "Reading sticker…" : "Reading…";
+    readPhase === "phone" || readPhase === "cloud"
+      ? "Reading sticker…"
+      : "Reading…";
 
   return (
-    <div className="scan-camera scan-camera--optional">
-      <p className="scan-camera__label muted">Optional — tap Scan to fill the fields above</p>
+    <div className="scan-camera">
       <div className={`scan-viewfinder${mode === "label" ? " scan-viewfinder--label" : ""}`}>
         <video ref={videoRef} className="scan-viewfinder__video" playsInline muted />
         <div className="scan-viewfinder__guide" aria-hidden>
