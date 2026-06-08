@@ -3,7 +3,7 @@ import { Link, useLocation, useNavigate } from "react-router-dom";
 import { ScanCameraPanel } from "@/components/ScanCameraPanel";
 import { isNativeApp } from "@/lib/native";
 import { hapticLight, hapticSuccess } from "@/lib/haptics";
-import { joinLabelFields, looksLikeWeakJobLine } from "@/lib/labelOcr";
+import { joinLabelFields, looksLikeWeakFabricLine, looksLikeWeakJobLine, looksLikeWeakSizeLine } from "@/lib/labelOcr";
 import { readScanNavState } from "@/lib/scanNavigation";
 import type { ScanMethod } from "@/types";
 
@@ -11,6 +11,9 @@ type ScanMode = "qr" | "label";
 
 const RENTAL_FABRIC_HINTS = [
   "SOLID",
+  "BLUE FOAM",
+  "DIGI GREEN",
+  "CHROMA GREEN",
   "DUVET",
   "DUVETYNE",
   "MUSLIN",
@@ -34,7 +37,9 @@ export function ScanPage() {
   const lockedLocationId = scanNav.lockedLocationId;
   const lockedLocationLabel = scanNav.lockedLocationLabel;
   const jobInputRef = useRef<HTMLInputElement>(null);
-  const focusJobAfterScan = useRef(false);
+  const fabricInputRef = useRef<HTMLInputElement>(null);
+  const sizeInputRef = useRef<HTMLInputElement>(null);
+  const focusFieldAfterScan = useRef<"job" | "fabric" | "size" | null>(null);
 
   const [mode, setMode] = useState<ScanMode>("label");
   const [error, setError] = useState<string | null>(null);
@@ -69,10 +74,17 @@ export function ScanPage() {
   }
 
   useEffect(() => {
-    if (mode !== "label" || !focusJobAfterScan.current) return;
-    focusJobAfterScan.current = false;
-    jobInputRef.current?.focus();
-    jobInputRef.current?.select();
+    if (mode !== "label" || !focusFieldAfterScan.current) return;
+    const target = focusFieldAfterScan.current;
+    focusFieldAfterScan.current = null;
+    const input =
+      target === "job"
+        ? jobInputRef.current
+        : target === "fabric"
+          ? fabricInputRef.current
+          : sizeInputRef.current;
+    input?.focus();
+    input?.select();
   }, [labelJob, labelFabric, labelSize, mode]);
 
   return (
@@ -81,9 +93,8 @@ export function ScanPage() {
       <p>
         {mode === "label" ? (
           <>
-            Most gear still uses a <strong>rental-house sticker</strong> — three lines: job number, fabric type,
-            and size. Center the white label in the camera, tap <strong>SCAN</strong>, then fix any line that
-            looks wrong.
+            Most gear uses a <strong>rental-house sticker</strong> — job number, fabric type, and size.
+            Every house writes differently; scan fills three lines, then tap to fix anything off.
           </>
         ) : (
           <>
@@ -148,7 +159,9 @@ export function ScanPage() {
           setLabelJob(fields.job);
           setLabelFabric(fields.fabric);
           setLabelSize(fields.size);
-          focusJobAfterScan.current = looksLikeWeakJobLine(fields.job);
+          if (looksLikeWeakJobLine(fields.job)) focusFieldAfterScan.current = "job";
+          else if (looksLikeWeakFabricLine(fields.fabric)) focusFieldAfterScan.current = "fabric";
+          else if (looksLikeWeakSizeLine(fields.size)) focusFieldAfterScan.current = "size";
         }}
         onError={setError}
       />
@@ -167,7 +180,7 @@ export function ScanPage() {
         <p style={{ marginBottom: 0 }}>
           {mode === "qr"
             ? "If the camera is unavailable, paste the QR JSON or code here."
-            : "Tap SCAN again or edit any line before continuing."}
+            : "Every rental label is different — tap SCAN again or edit any line before continuing."}
         </p>
         {mode === "qr" ? (
           <textarea
@@ -195,6 +208,7 @@ export function ScanPage() {
               <label htmlFor="label-fabric">Line 2 — fabric type</label>
               <input
                 id="label-fabric"
+                ref={fabricInputRef}
                 className="input"
                 placeholder="e.g. SOLID"
                 value={labelFabric}
@@ -213,6 +227,7 @@ export function ScanPage() {
               <label htmlFor="label-size">Line 3 — size</label>
               <input
                 id="label-size"
+                ref={sizeInputRef}
                 className="input"
                 placeholder={"e.g. 12' x 12'"}
                 value={labelSize}

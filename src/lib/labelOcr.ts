@@ -535,21 +535,24 @@ function repairJobLine(line: string): string {
   return trimmed;
 }
 
-function repairFabricLine(line: string): string {
-  let trimmed = normalizeLine(line).replace(/^\d+\s+/, "");
-  const upper = trimmed.toUpperCase();
-  if (/^[A-Z][A-Z0-9' ./-]{2,}$/.test(upper) && upper.includes(" ") && upper.length >= 6) {
-    return upper.replace(/\s+/g, " ").trim();
-  }
-  const keyword = extractFabricKeyword(upper);
-  if (keyword) return keyword;
+function normalizeFabricLine(line: string): string {
+  const trimmed = normalizeLine(line).replace(/^\d+\s+/, "");
+  if (!trimmed) return "";
+  const upper = trimmed.toUpperCase().replace(/\s+/g, " ").trim();
   const compact = upper.replace(/[^A-Z]/g, "");
   if (SOLID_ALIASES.has(compact)) return "SOLID";
-  for (const kw of FABRIC_KEYWORDS) {
-    if (levenshtein(compact, kw) <= 3) return kw;
-  }
+  return upper;
+}
+
+function repairFabricLine(line: string): string {
+  const normalized = normalizeFabricLine(line);
+  if (normalized.includes(" ") && normalized.length >= 5) return normalized;
+  const compact = normalized.replace(/[^A-Z]/g, "");
+  if (SOLID_ALIASES.has(compact)) return "SOLID";
   if (/^O+L+$|^SO?L+$|^SOU?D$|^S0LID$|^OB$|^OOB$/i.test(compact)) return "SOLID";
-  return trimmed;
+  const keyword = extractFabricKeyword(normalized);
+  if (keyword && levenshtein(compact, keyword) <= 1) return keyword;
+  return normalized;
 }
 
 function repairSizeLineStrict(line: string): string {
@@ -1159,10 +1162,13 @@ export async function recognizeLabelFieldsFromImage(
     const { recognizeLabelFieldsCloud } = await import("@/lib/labelOcrCloud");
     const cloud = await recognizeLabelFieldsCloud(cloudDataUrl);
     if (cloud && (cloud.job || cloud.fabric || cloud.size)) {
-      if (looksLikeWeakJobLine(cloud.job)) {
+      const cloudLooksGood =
+        !looksLikeWeakFabricLine(cloud.fabric) && !looksLikeWeakSizeLine(cloud.size);
+      if (looksLikeWeakJobLine(cloud.job) && cloudLooksGood) {
         const localJob = await recognizeJobDigitsLocal(canvas);
-        if (localJob && isPlausibleJobDigits(localJob.replace(/\D/g, ""))) {
-          cloud.job = localJob.replace(/\D/g, "");
+        const localDigits = localJob.replace(/\D/g, "");
+        if (isPlausibleJobDigits(localDigits)) {
+          cloud.job = localDigits;
         }
       }
       return cloud;
@@ -1296,57 +1302,90 @@ export async function recognizeLabelFromImage(
   return joinLabelFields(fields.job, fields.fabric, fields.size);
 }
 
+function scoreParsedLabelFields(fields: LabelOcrFields): number {
+  let score = 0;
+  const jobDigits = fields.job.replace(/\D/g, "");
+  if (isPlausibleJobDigits(jobDigits)) score += 50;
+  if (fields.fabric.length >= 3) score += 35;
+  if (extractDimensions(fields.size)) score += 35;
+  return score;
+}
+
+function assignLinesByContent(lines: string[]): LabelOcrFields {
+  const sizeLine = lines.find((line) => extractDimensions(line));
+  const jobLine = lines.find((line) => {
+    const digits = line.replace(/\D/g, "");
+    return isPlausibleJobDigits(digits);
+  });
+  const fabricParts = lines.filter((line) => line !== sizeLine && line !== jobLine);
+
+  return {
+    job: jobLine ? pickBestJobFromCandidates([jobLine], jobLine) : "",
+    fabric: fabricParts.map(normalizeFabricLine).filter(Boolean).join(" ").trim(),
+    size: sizeLine ? repairSizeLineStrict(sizeLine) : "",
+  };
+}
+
 /** Parse multi-line OCR (e.g. Google Vision) into sticker fields. */
 export function parseRawTextToLabelFields(rawText: string): LabelOcrFields {
   const lines = rawText
     .split(/\n/)
     .map((line) => normalizeLine(line))
     .filter(Boolean);
-  const rawContext = rawText;
 
   if (lines.length >= 3) {
-    return {
+    const positional: LabelOcrFields = {
       job: pickBestJobFromCandidates([lines[0]!], lines[0]!),
-      fabric: repairFabricLine(lines[1]!),
+      fabric: normalizeFabricLine(lines[1]!),
       size: repairSizeLineStrict(lines[2]!),
     };
+    const byContent = assignLinesByContent(lines);
+    return scoreParsedLabelFields(byContent) > scoreParsedLabelFields(positional)
+      ? byContent
+      : positional;
   }
 
   if (lines.length === 2) {
-    const secondIsSize = Boolean(extractDimensions(lines[1]!) || /\d/.test(lines[1]!));
-    return {
-      job: pickBestJobFromCandidates([lines[0]!], rawContext),
-      fabric: secondIsSize ? "" : pickBestFabricFromCandidates([lines[1]!]),
-      size: secondIsSize ? pickBestSizeFromCandidates([lines[1]!], rawContext) : "",
-    };
+    return assignLinesByContent(lines);
   }
 
-  const structured = extractLabelFields(rawContext);
-  return splitLabelIntoFields(structured || lines.join(" / "), rawContext);
+  if (lines.length === 1) {
+    return assignLinesByContent(lines);
+  }
+
+  return { job: "", fabric: "", size: "" };
 }
 
 /** True when line 1 probably still needs a human fix. */
 export function looksLikeWeakJobLine(job: string): boolean {
-  return job.replace(/\D/g, "").length < 4;
+  return !isPlausibleJobDigits(job.replace(/\D/g, ""));
+}
+
+export function looksLikeWeakFabricLine(fabric: string): boolean {
+  return fabric.trim().length < 3;
+}
+
+export function looksLikeWeakSizeLine(size: string): boolean {
+  return !extractDimensions(size);
 }
 
 /** Split combined label OCR into the three common sticker lines. */
 export function splitLabelIntoFields(
   text: string,
-  rawContext = ""
+  _rawContext = ""
 ): { job: string; fabric: string; size: string } {
   const parts = text.split("/").map((p) => p.trim()).filter(Boolean);
   if (parts.length >= 3) {
     return {
-      job: pickBestJobFromCandidates([parts[0]!], `${rawContext}\n${text}`),
-      fabric: pickBestFabricFromCandidates([parts[1]!]),
-      size: pickBestSizeFromCandidates([parts[2]!], `${rawContext}\n${text}`),
+      job: pickBestJobFromCandidates([parts[0]!], parts[0]!),
+      fabric: normalizeFabricLine(parts[1]!),
+      size: repairSizeLineStrict(parts[2]!),
     };
   }
   return {
-    job: pickBestJobFromCandidates(parts.length ? [parts[0]!] : [], `${rawContext}\n${text}`),
-    fabric: pickBestFabricFromCandidates(parts[1] ? [parts[1]] : []),
-    size: pickBestSizeFromCandidates(parts.slice(2), `${rawContext}\n${text}`),
+    job: pickBestJobFromCandidates(parts.length ? [parts[0]!] : [], parts[0] ?? ""),
+    fabric: parts[1] ? normalizeFabricLine(parts[1]) : "",
+    size: parts[2] ? repairSizeLineStrict(parts.slice(2).join(" ")) : "",
   };
 }
 
