@@ -1007,7 +1007,7 @@ p {
 .scan-viewfinder {
   position: relative;
   width: 100%;
-  min-height: 300px;
+  min-height: 220px;
   border-radius: var(--radius);
   overflow: hidden;
   border: 1px solid var(--border);
@@ -1018,7 +1018,7 @@ p {
   width: 100%;
   display: block;
   object-fit: cover;
-  min-height: 300px;
+  min-height: 220px;
 }
 
 .scan-viewfinder__guide {
@@ -1168,6 +1168,16 @@ p {
 
 .scan-camera {
   width: 100%;
+}
+
+.scan-camera--optional {
+  margin-top: 0.25rem;
+}
+
+.scan-camera__label {
+  margin: 0 0 0.45rem;
+  font-size: 0.85rem;
+  text-align: center;
 }
 
 #cloud-account {

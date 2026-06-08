@@ -5,6 +5,7 @@ import { cropVideoFrameToGuide } from "@/lib/labelOcrImage";
 import {
   scanLabelFromCapture,
   type LabelScanOutcome,
+  type ScanReadPhase,
 } from "@/lib/labelOcrCloud";
 import type { LabelOcrFields } from "@/lib/labelOcr";
 import { captureVideoFrame, decodeQrFromCanvas } from "@/lib/scanQrFromImage";
@@ -36,6 +37,7 @@ export function ScanCameraPanel({
   const videoRef = useRef<HTMLVideoElement>(null);
   const [ready, setReady] = useState(false);
   const [busy, setBusy] = useState(false);
+  const [readPhase, setReadPhase] = useState<ScanReadPhase | null>(null);
   const [flash, setFlash] = useState(false);
 
   useEffect(() => {
@@ -51,6 +53,8 @@ export function ScanCameraPanel({
             facingMode: { ideal: "environment" },
             width: { ideal: 1920 },
             height: { ideal: 1080 },
+            // @ts-expect-error focusMode in advanced mobile constraints
+            focusMode: { ideal: "continuous" },
           },
           audio: false,
         });
@@ -81,10 +85,11 @@ export function ScanCameraPanel({
 
     triggerCaptureFeedback(setFlash);
     setBusy(true);
+    setReadPhase(null);
 
     try {
       const canvas = mode === "label" ? cropVideoFrameToGuide(video) : await captureVideoFrame(video);
-      const jpegDataUrl = canvas.toDataURL("image/jpeg", 0.88);
+      const jpegDataUrl = canvas.toDataURL("image/jpeg", 0.95);
 
       if (mode === "qr") {
         const text = await decodeQrFromCanvas(canvas);
@@ -98,18 +103,19 @@ export function ScanCameraPanel({
         return;
       }
 
-      const outcome = await scanLabelFromCapture(canvas, jpegDataUrl);
+      const outcome = await scanLabelFromCapture(canvas, jpegDataUrl, (phase) => setReadPhase(phase));
       const hasFields = Boolean(outcome.fields.job || outcome.fields.fabric || outcome.fields.size);
 
       onLabelFields?.(outcome.fields);
       onLabelScan?.(outcome);
+      onCameraError?.(null);
 
       if (hasFields) hapticSuccess();
     } catch (e) {
       const raw = e instanceof Error ? e.message : "Could not read scan.";
       const message =
         raw.includes("MIME type") || raw.includes("Failed to fetch") || raw.includes("Load failed")
-          ? "Refresh the page, then try Scan again — or type the label below."
+          ? "Refresh the page, then try Scan again."
           : raw || "Could not read scan.";
       onLabelScan?.({
         fields: { job: "", fabric: "", size: "" },
@@ -118,11 +124,16 @@ export function ScanCameraPanel({
       });
     } finally {
       setBusy(false);
+      setReadPhase(null);
     }
   }
 
+  const readingLabel =
+    readPhase === "phone" ? "Reading on phone…" : readPhase === "cloud" ? "Reading sticker…" : "Reading…";
+
   return (
-    <div className="scan-camera">
+    <div className="scan-camera scan-camera--optional">
+      <p className="scan-camera__label muted">Optional — tap Scan to fill the fields above</p>
       <div className={`scan-viewfinder${mode === "label" ? " scan-viewfinder--label" : ""}`}>
         <video ref={videoRef} className="scan-viewfinder__video" playsInline muted />
         <div className="scan-viewfinder__guide" aria-hidden>
@@ -137,7 +148,7 @@ export function ScanCameraPanel({
         ) : null}
         {busy ? (
           <div className="scan-viewfinder__reading muted" role="status">
-            Reading…
+            {readingLabel}
           </div>
         ) : null}
         <button

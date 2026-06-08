@@ -75,10 +75,12 @@ Deno.serve(async (req) => {
 
     if (ocrSpaceKey) {
       const ocrSpaceText = await runOcrSpaceCombined(ocrSpaceKey, imageBase64);
-      if (ocrSpaceText) return json({ text: ocrSpaceText, provider: "ocrspace" });
+      if (ocrSpaceText) {
+        return json({ text: ocrSpaceText, rawText: ocrSpaceText, provider: "ocrspace" });
+      }
     }
 
-    return json({ text: "", error: "no_text_detected" });
+    return json({ text: "", rawText: "", error: "no_text_detected" });
   } catch (e) {
     return json({ text: "", error: e instanceof Error ? e.message : "unknown" }, 500);
   }
@@ -115,11 +117,10 @@ async function runGoogleVision(apiKey: string, imageBase64: string): Promise<str
 async function runOcrSpaceCombined(apiKey: string, imageBase64: string): Promise<string | null> {
   if (imageBase64.length > 1_350_000) return null;
 
-  const chunks: string[] = [];
-  for (const engine of ["2", "1"] as const) {
-    const text = await runOcrSpaceEngine(apiKey, imageBase64, engine);
-    if (text) chunks.push(text);
-  }
+  const results = await Promise.all(
+    (["2", "1"] as const).map((engine) => runOcrSpaceEngine(apiKey, imageBase64, engine))
+  );
+  const chunks = results.filter((text): text is string => Boolean(text));
   if (!chunks.length) return null;
   return mergeOcrTexts(chunks);
 }
@@ -163,7 +164,7 @@ async function runOcrSpaceEngine(
     return null;
   }
 
-  const text = payload.ParsedResults?.[0]?.ParsedText?.trim() ?? "";
+  const text = payload.ParsedResults?.map((r) => r.ParsedText?.trim() ?? "").filter(Boolean).join("\n") ?? "";
   return text || null;
 }
 
