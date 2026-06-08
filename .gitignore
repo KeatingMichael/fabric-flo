@@ -19,3 +19,4 @@ coverage
 !.vscode/extensions.json
 .cursor/plugins/
 .codex/
+supabase/.temp/
