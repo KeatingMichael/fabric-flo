@@ -12,16 +12,12 @@ import {
 import { SyncStatusProvider } from "@/context/SyncStatusProvider";
 import App from "@/App";
 import { initNativeShell } from "@/lib/initNativeShell";
-import { scrollPageToTop } from "@/lib/scrollToTop";
 import "@/styles/global.css";
 
 void initNativeShell();
 
-if (typeof window !== "undefined") {
-  if ("scrollRestoration" in window.history) {
-    window.history.scrollRestoration = "manual";
-  }
-  scrollPageToTop();
+if (typeof window !== "undefined" && "scrollRestoration" in window.history) {
+  window.history.scrollRestoration = "manual";
 }
 
 createRoot(document.getElementById("root")!).render(

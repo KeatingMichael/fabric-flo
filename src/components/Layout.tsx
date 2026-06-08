@@ -4,6 +4,7 @@ import { FabricFloBrandHeader } from "@/components/FabricFloBrandHeader";
 import { LegalFooter } from "@/components/LegalFooter";
 import { SyncStatusBanner } from "@/components/SyncStatusBanner";
 import { useActiveProduction } from "@/context/AppStore";
+import { ScrollMainProvider, useScrollMain } from "@/context/ScrollMainContext";
 import { hapticSelection } from "@/lib/haptics";
 
 const nav = [
@@ -15,27 +16,42 @@ const nav = [
 ] as const;
 
 export function Layout({ children }: { children: ReactNode }) {
+  return (
+    <ScrollMainProvider>
+      <LayoutShell>{children}</LayoutShell>
+    </ScrollMainProvider>
+  );
+}
+
+function LayoutShell({ children }: { children: ReactNode }) {
   const location = useLocation();
   const production = useActiveProduction();
+  const { mainRef, scrollMainToTop } = useScrollMain();
   const noNavPaths = ["/", "/app", "/help", "/privacy", "/terms", "/launch", "/licenses"];
   const showNav =
     production && !noNavPaths.includes(location.pathname) && location.pathname !== "/assign";
   const showLegalFooter = noNavPaths.includes(location.pathname);
 
   return (
-    <div className={`app-shell${showNav ? " app-shell--with-nav" : ""}`}>
+    <div className="app-shell">
       <FabricFloBrandHeader />
       <SyncStatusBanner />
-      <main className="app-main">
+      <main ref={mainRef} className="app-main">
         {children}
         {showLegalFooter ? <LegalFooter /> : null}
       </main>
-      {showNav ? <BottomNav pathname={location.pathname} /> : null}
+      {showNav ? <BottomNav pathname={location.pathname} onNavigate={scrollMainToTop} /> : null}
     </div>
   );
 }
 
-function BottomNav({ pathname }: { pathname: string }) {
+function BottomNav({
+  pathname,
+  onNavigate,
+}: {
+  pathname: string;
+  onNavigate: () => void;
+}) {
   return (
     <nav className="app-bottom-nav" aria-label="Main">
       <div className="app-bottom-nav__inner">
@@ -46,7 +62,10 @@ function BottomNav({ pathname }: { pathname: string }) {
               key={item.to}
               to={item.to}
               className={`app-bottom-nav__link${active ? " app-bottom-nav__link--active" : ""}`}
-              onClick={() => hapticSelection()}
+              onClick={() => {
+                onNavigate();
+                hapticSelection();
+              }}
             >
               <span className="app-bottom-nav__icon" aria-hidden>
                 {item.icon}

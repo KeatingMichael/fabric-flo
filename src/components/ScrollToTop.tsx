@@ -1,10 +1,11 @@
 import { useLayoutEffect } from "react";
 import { useLocation } from "react-router-dom";
-import { scrollPageToTop } from "@/lib/scrollToTop";
+import { useScrollMain } from "@/context/ScrollMainContext";
 
-/** Reset document scroll once before paint when the route changes. */
+/** Reset the main scroll pane once when the route changes. */
 export function ScrollToTop() {
   const { pathname } = useLocation();
+  const { scrollMainToTop } = useScrollMain();
 
   useLayoutEffect(() => {
     if ("scrollRestoration" in window.history) {
@@ -13,8 +14,8 @@ export function ScrollToTop() {
   }, []);
 
   useLayoutEffect(() => {
-    scrollPageToTop();
-  }, [pathname]);
+    scrollMainToTop();
+  }, [pathname, scrollMainToTop]);
 
   return null;
 }
