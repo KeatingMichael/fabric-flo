@@ -115,10 +115,24 @@ async function runGoogleVision(apiKey: string, imageBase64: string): Promise<str
 async function runOcrSpaceCombined(apiKey: string, imageBase64: string): Promise<string | null> {
   if (imageBase64.length > 1_350_000) return null;
 
-  const engine2 = await runOcrSpaceEngine(apiKey, imageBase64, "2");
-  if (engine2) return engine2;
+  const chunks: string[] = [];
+  for (const engine of ["2", "1"] as const) {
+    const text = await runOcrSpaceEngine(apiKey, imageBase64, engine);
+    if (text) chunks.push(text);
+  }
+  if (!chunks.length) return null;
+  return mergeOcrTexts(chunks);
+}
 
-  return await runOcrSpaceEngine(apiKey, imageBase64, "1");
+function mergeOcrTexts(chunks: string[]): string {
+  const lines = new Set<string>();
+  for (const chunk of chunks) {
+    for (const line of chunk.split(/\r?\n/)) {
+      const trimmed = line.trim();
+      if (trimmed.length >= 2) lines.add(trimmed);
+    }
+  }
+  return [...lines].join("\n");
 }
 
 async function runOcrSpaceEngine(

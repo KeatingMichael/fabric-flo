@@ -109,7 +109,7 @@ export function ScanCameraPanel({ mode, onQrDecoded, onLabelText, onLabelFields,
   const hint =
     mode === "qr"
       ? "Center the dynamic QR in the frame, then tap SCAN."
-      : "Line up all three sticker lines inside the frame — white paper only, good light — then tap SCAN.";
+      : "Fill the frame with the whole white label — any handwriting layout is fine. Good light, then tap SCAN.";
 
   return (
     <div className="stack scan-camera">
@@ -120,13 +120,6 @@ export function ScanCameraPanel({ mode, onQrDecoded, onLabelText, onLabelFields,
           <span className="scan-corner scan-corner--tr" />
           <span className="scan-corner scan-corner--bl" />
           <span className="scan-corner scan-corner--br" />
-          {mode === "label" ? (
-            <>
-              <span className="scan-label-line scan-label-line--1" />
-              <span className="scan-label-line scan-label-line--2" />
-              <span className="scan-label-line scan-label-line--3" />
-            </>
-          ) : null}
         </div>
         <div className={`scan-viewfinder__flash${flash ? " scan-viewfinder__flash--on" : ""}`} aria-hidden />
         {!ready ? (

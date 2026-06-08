@@ -37,6 +37,18 @@ const FABRIC_KEYWORDS = [
   "NET",
 ];
 
+/** Multi-word rental-house fabric names — checked longest-first before single keywords. */
+const FABRIC_PHRASES = [
+  "BLUE FOAM",
+  "DIGI GREEN",
+  "CHROMA GREEN",
+  "CHROMA KEY",
+  "GREEN SCREEN",
+  "BLACK DUVET",
+  "WHITE DUVET",
+  ...FABRIC_KEYWORDS,
+];
+
 const GUIDE_INSET_TOP = 0.12;
 const GUIDE_INSET_BOTTOM = 0.12;
 const GUIDE_INSET_LEFT = 0.1;
@@ -557,7 +569,7 @@ function repairFabricLine(line: string): string {
 
 function repairSizeLineStrict(line: string): string {
   const trimmed = normalizeLine(line);
-  return extractDimensions(trimmed) ?? trimmed;
+  return extractDimensions(trimmed) ?? "";
 }
 
 function repairSizeLine(line: string, rawContext = ""): string {
@@ -595,44 +607,60 @@ function extractJobNumber(text: string): string | null {
   return extractBestJobNumber(text);
 }
 
-function extractFabricKeyword(text: string): string | null {
-  const upper = text.toUpperCase();
+function extractFabricPhrase(text: string): string | null {
+  const upper = text.toUpperCase().replace(/\s+/g, " ");
+  for (const phrase of FABRIC_PHRASES) {
+    if (upper.includes(phrase)) return phrase;
+  }
   const compact = upper.replace(/[^A-Z]/g, "");
-  for (const kw of FABRIC_KEYWORDS) {
-    if (upper.includes(kw) || compact.includes(kw)) return kw;
-  }
-  for (const kw of FABRIC_KEYWORDS) {
-    if (kw.length < 4) continue;
-    for (let i = 0; i <= compact.length - kw.length; i++) {
-      const slice = compact.slice(i, i + kw.length);
-      if (levenshtein(slice, kw) <= 1) return kw;
-    }
-  }
-  const words = upper.match(/[A-Z]{3,}/g) ?? [];
-  for (const word of words) {
-    for (const kw of FABRIC_KEYWORDS) {
-      if (levenshtein(word, kw) <= 1) return kw;
+  for (const phrase of FABRIC_PHRASES) {
+    const phraseCompact = phrase.replace(/\s/g, "");
+    if (phraseCompact.length < 4) continue;
+    if (compact.includes(phraseCompact)) return phrase;
+    for (let i = 0; i <= compact.length - phraseCompact.length; i++) {
+      const slice = compact.slice(i, i + phraseCompact.length);
+      if (levenshtein(slice, phraseCompact) <= 1) return phrase;
     }
   }
   return null;
 }
 
-function extractDimensions(text: string): string | null {
+function extractFabricKeyword(text: string): string | null {
+  return extractFabricPhrase(text);
+}
+
+function extractAllDimensions(text: string): string[] {
   const normalized = text.replace(/[×]/g, "X").replace(/[''´`]/g, "'");
-  const direct = normalized.match(/(\d{1,3})\s*'?\s*[xX]\s*'?\s*(\d{1,3})/);
-  if (direct) {
-    const a = direct[1]!;
-    const b = direct[2]!;
+  const results: string[] = [];
+  const re = /(\d{1,3})\s*'?\s*[xX]\s*'?\s*(\d{1,3})/g;
+  let match: RegExpExecArray | null;
+  while ((match = re.exec(normalized))) {
+    const a = match[1]!;
+    const b = match[2]!;
     if (a.length === 1 && b.length === 2 && Number(b) >= 8) {
-      return `${b}' X ${b}'`;
+      results.push(`${b}' X ${b}'`);
+    } else {
+      results.push(`${a}' X ${b}'`);
     }
-    return `${a}' X ${b}'`;
   }
-  const spaced = normalized.match(/\b(\d{1,2})\s+(\d{1,2})\b/);
-  if (spaced) {
-    return `${spaced[1]}' X ${spaced[2]}'`;
+  const spaced = normalized.match(/\b(\d{1,2})\s+(\d{1,2})\b/g) ?? [];
+  for (const pair of spaced) {
+    const parts = pair.match(/\b(\d{1,2})\s+(\d{1,2})\b/);
+    if (parts) results.push(`${parts[1]}' X ${parts[2]}'`);
   }
-  return null;
+  return [...new Set(results)];
+}
+
+function pickBestSizeFromText(text: string): string {
+  const dims = extractAllDimensions(text);
+  if (!dims.length) return "";
+  dims.sort((a, b) => scoreSizeCandidate(b) - scoreSizeCandidate(a));
+  return dims[0]!;
+}
+
+function extractDimensions(text: string): string | null {
+  const size = pickBestSizeFromText(text);
+  return size || null;
 }
 
 function scoreLabelText(text: string): number {
@@ -826,13 +854,17 @@ function bandVariants(band: HTMLCanvasElement): HTMLCanvasElement[] {
 }
 
 function scoreFabricCandidate(text: string): number {
-  const compact = text.toUpperCase().replace(/[^A-Z]/g, "");
+  const normalized = normalizeFabricLine(text);
+  const compact = normalized.replace(/[^A-Z]/g, "");
   if (compact.length < 3) return 0;
   if (SOLID_ALIASES.has(compact)) return 100;
+  const phrase = extractFabricPhrase(text);
+  if (phrase && normalized.includes(phrase)) return 95 + phrase.length;
+  if (normalized.includes(" ")) return 75 + normalized.length;
   for (const kw of FABRIC_KEYWORDS) {
-    if (compact === kw) return 92;
-    if (levenshtein(compact, kw) <= 1) return 82;
-    if (levenshtein(compact, kw) === 2) return 55;
+    if (compact === kw) return 72;
+    if (levenshtein(compact, kw) <= 1) return 65;
+    if (levenshtein(compact, kw) === 2) return 45;
   }
   return scoreReadableLine(text);
 }
@@ -849,9 +881,12 @@ function scoreSizeCandidate(size: string): number {
   const matched = size.match(/^(\d+)' X (\d+)'$/);
   if (!matched) return scoreReadableLine(size);
   let score = 30;
+  const a = Number(matched[1]!);
+  const b = Number(matched[2]!);
   if (matched[1] !== matched[2]) score += 20;
   if (matched[1] === matched[2]) score += 10;
   if (matched[1]!.length >= 2) score += 10;
+  if (a >= 20 || b >= 20) score += 12;
   return score;
 }
 
@@ -900,14 +935,23 @@ function pickBestFabricFromCandidates(candidates: string[]): string {
 function pickBestSizeFromCandidates(candidates: string[], rawContext: string): string {
   const options = new Map<string, number>();
   for (const candidate of candidates) {
+    const fromCandidate = pickBestSizeFromText(candidate);
+    if (fromCandidate) {
+      options.set(
+        fromCandidate,
+        (options.get(fromCandidate) ?? 0) + scoreSizeCandidate(fromCandidate) + scoreReadableLine(candidate)
+      );
+    }
     const repaired = repairSizeLine(candidate, `${rawContext}\n${candidate}`);
-    if (!repaired) continue;
-    options.set(
-      repaired,
-      (options.get(repaired) ?? 0) + scoreSizeCandidate(repaired) + scoreReadableLine(candidate)
-    );
+    const fromRepaired = extractDimensions(repaired);
+    if (fromRepaired) {
+      options.set(
+        fromRepaired,
+        (options.get(fromRepaired) ?? 0) + scoreSizeCandidate(fromRepaired)
+      );
+    }
   }
-  const fromContext = extractDimensions(rawContext);
+  const fromContext = pickBestSizeFromText(rawContext);
   if (fromContext) {
     options.set(fromContext, (options.get(fromContext) ?? 0) + scoreSizeCandidate(fromContext) + 15);
   }
@@ -920,7 +964,7 @@ function pickBestSizeFromCandidates(candidates: string[], rawContext: string): s
       best = size;
     }
   }
-  return best || repairSizeLine(candidates[0] ?? "", rawContext);
+  return best;
 }
 
 async function readBandDigits(worker: Worker, band: HTMLCanvasElement): Promise<string[]> {
@@ -1154,22 +1198,34 @@ export async function recognizeLabelFieldsFromImage(
   }
 
   canvas = autoCropLabelRegion(canvas);
-  const dataUrl = jpegDataUrl ?? canvas.toDataURL("image/jpeg", 0.95);
+  const ocrCanvas = preprocessLabelContrast(scaleCanvas(canvas, 3200));
+  const dataUrl = jpegDataUrl ?? ocrCanvas.toDataURL("image/jpeg", 0.95);
 
-  const cloudDataUrl = shrinkJpegForCloud(canvas, dataUrl);
+  const cloudDataUrl = shrinkJpegForCloud(ocrCanvas, dataUrl);
 
   if (typeof navigator !== "undefined" && navigator.onLine) {
     const { recognizeLabelFieldsCloud } = await import("@/lib/labelOcrCloud");
     const cloud = await recognizeLabelFieldsCloud(cloudDataUrl);
     if (cloud && (cloud.job || cloud.fabric || cloud.size)) {
-      const cloudLooksGood =
-        !looksLikeWeakFabricLine(cloud.fabric) && !looksLikeWeakSizeLine(cloud.size);
-      if (looksLikeWeakJobLine(cloud.job) && cloudLooksGood) {
-        const localJob = await recognizeJobDigitsLocal(canvas);
-        const localDigits = localJob.replace(/\D/g, "");
-        if (isPlausibleJobDigits(localDigits)) {
-          cloud.job = localDigits;
-        }
+      if (!labelFieldsNeedLocalFallback(cloud)) {
+        return cloud;
+      }
+      const local = await recognizeLabelFieldsLocal(canvas);
+      const merged = mergeLabelFieldResults(cloud, local);
+      if (scoreParsedLabelFields(merged) >= scoreParsedLabelFields(cloud)) {
+        return merged;
+      }
+      if (looksLikeWeakJobLine(cloud.job)) {
+        const localDigits = local.job.replace(/\D/g, "");
+        if (isPlausibleJobDigits(localDigits)) cloud.job = localDigits;
+      }
+      if (looksLikeWeakSizeLine(cloud.size) && !looksLikeWeakSizeLine(local.size)) {
+        cloud.size = local.size;
+      }
+      if (
+        scoreFabricCandidate(local.fabric) > scoreFabricCandidate(cloud.fabric) + 10
+      ) {
+        cloud.fabric = local.fabric;
       }
       return cloud;
     }
@@ -1190,35 +1246,6 @@ function shrinkJpegForCloud(canvas: HTMLCanvasElement, preferred?: string): stri
     if (base64.length <= maxBase64) return url;
   }
   return canvas.toDataURL("image/jpeg", 0.5);
-}
-
-/** Digit-only pass on the top sticker line (local Tesseract). */
-async function recognizeJobDigitsLocal(canvas: HTMLCanvasElement): Promise<string> {
-  const worker = await createWorker("eng", 1, { logger: () => {} });
-  try {
-    const jobBand = cropVerticalBand(canvas, 0, 0.4);
-    const candidates: string[] = [];
-    for (const variant of [
-      jobBand,
-      scaleCanvasWidth(jobBand, 2),
-      preprocessLabelBinarize(jobBand),
-      thickenBinary(preprocessLabelBinarize(jobBand)),
-      preprocessLabelContrast(jobBand),
-    ]) {
-      for (const psm of [PSM.SINGLE_LINE, PSM.SINGLE_WORD, PSM.RAW_LINE]) {
-        const digits = (await recognizeStripRaw(worker, variant, DIGIT_WHITELIST, psm)).replace(
-          /\D/g,
-          ""
-        );
-        if (digits.length >= 4) candidates.push(digits);
-      }
-      const ensemble = await ensembleDigitRead(worker, variant);
-      if (ensemble.length >= 4) candidates.push(ensemble);
-    }
-    return pickBestJobFromCandidates(candidates, candidates.join("\n"));
-  } finally {
-    await worker.terminate();
-  }
 }
 
 async function recognizeLabelFieldsLocal(canvas: HTMLCanvasElement): Promise<LabelOcrFields> {
@@ -1266,24 +1293,32 @@ async function recognizeLabelFieldsLocal(canvas: HTMLCanvasElement): Promise<Lab
     const merged = pickBestAttempt(attempts);
     const mergedParts = splitLabelIntoFields(merged, allRaw);
 
-    const fields: LabelOcrFields = {
-      job:
-        pickBestJobFromCandidates(
-          [bandResult.fields.job, mergedParts.job, ...rawChunks],
-          allRaw
-        ) || bandResult.fields.job,
-      fabric:
-        pickBestFabricFromCandidates([
-          bandResult.fields.fabric,
-          mergedParts.fabric,
-          ...attempts.flatMap((a) => a.text.split("/").map((p) => p.trim())),
-        ]) || bandResult.fields.fabric,
-      size:
-        pickBestSizeFromCandidates(
-          [bandResult.fields.size, mergedParts.size, ...rawChunks],
-          allRaw
-        ) || bandResult.fields.size,
-    };
+    const fieldCandidates: LabelOcrFields[] = [
+      extractAllFieldsFromText(allRaw),
+      parseRawTextToLabelFields(allRaw),
+      {
+        job:
+          pickBestJobFromCandidates(
+            [bandResult.fields.job, mergedParts.job, ...rawChunks],
+            allRaw
+          ) || bandResult.fields.job,
+        fabric:
+          pickBestFabricFromCandidates([
+            bandResult.fields.fabric,
+            mergedParts.fabric,
+            ...attempts.flatMap((a) => a.text.split("/").map((p) => p.trim())),
+          ]) || bandResult.fields.fabric,
+        size:
+          pickBestSizeFromCandidates(
+            [bandResult.fields.size, mergedParts.size, ...rawChunks],
+            allRaw
+          ) || bandResult.fields.size,
+      },
+      bandResult.fields,
+    ];
+
+    fieldCandidates.sort((a, b) => scoreParsedLabelFields(b) - scoreParsedLabelFields(a));
+    const fields = fieldCandidates[0]!;
 
     if (!fields.job && !fields.fabric && !fields.size) {
       return bandResult.fields;
@@ -1306,9 +1341,59 @@ function scoreParsedLabelFields(fields: LabelOcrFields): number {
   let score = 0;
   const jobDigits = fields.job.replace(/\D/g, "");
   if (isPlausibleJobDigits(jobDigits)) score += 50;
-  if (fields.fabric.length >= 3) score += 35;
-  if (extractDimensions(fields.size)) score += 35;
+  else if (jobDigits.length > 0) score -= 35;
+
+  const fabric = fields.fabric.trim();
+  if (fabric.length >= 3) {
+    score += 30;
+    if (fabric.includes(" ")) score += 18;
+    if (extractFabricPhrase(fabric)) score += 12;
+  }
+
+  const sizeDim = extractDimensions(fields.size);
+  if (sizeDim) score += 40;
+  else if (fields.size.trim()) score -= 45;
+  if (fields.size.includes("/")) score -= 50;
+
   return score;
+}
+
+function labelFieldsNeedLocalFallback(fields: LabelOcrFields): boolean {
+  return (
+    scoreParsedLabelFields(fields) < 75 ||
+    looksLikeWeakJobLine(fields.job) ||
+    looksLikeWeakSizeLine(fields.size) ||
+    looksLikeWeakFabricLine(fields.fabric)
+  );
+}
+
+function mergeLabelFieldResults(primary: LabelOcrFields, secondary: LabelOcrFields): LabelOcrFields {
+  const context = [primary.job, primary.fabric, primary.size, secondary.job, secondary.fabric, secondary.size].join(
+    "\n"
+  );
+  return {
+    job: pickBestJobFromCandidates([primary.job, secondary.job], context),
+    fabric: pickBestFabricFromCandidates([primary.fabric, secondary.fabric]),
+    size: pickBestSizeFromCandidates([primary.size, secondary.size], context),
+  };
+}
+
+/** Pull job, fabric, and size from noisy OCR regardless of line breaks. */
+function extractAllFieldsFromText(rawText: string): LabelOcrFields {
+  const blob = rawText.replace(/\r/g, "\n");
+  const lines = blob
+    .split(/\n/)
+    .map((line) => normalizeLine(line))
+    .filter(Boolean);
+  const context = blob;
+
+  const job = pickBestJobFromCandidates([...lines, blob.replace(/\n/g, " ")], context);
+  const fabric =
+    extractFabricPhrase(context) ||
+    pickBestFabricFromCandidates(lines.length ? lines : [blob.replace(/\n/g, " ")]);
+  const size = pickBestSizeFromText(context);
+
+  return { job, fabric, size };
 }
 
 function assignLinesByContent(lines: string[]): LabelOcrFields {
@@ -1333,27 +1418,21 @@ export function parseRawTextToLabelFields(rawText: string): LabelOcrFields {
     .map((line) => normalizeLine(line))
     .filter(Boolean);
 
+  const candidates: LabelOcrFields[] = [extractAllFieldsFromText(rawText)];
+
   if (lines.length >= 3) {
-    const positional: LabelOcrFields = {
+    candidates.push({
       job: pickBestJobFromCandidates([lines[0]!], lines[0]!),
       fabric: normalizeFabricLine(lines[1]!),
       size: repairSizeLineStrict(lines[2]!),
-    };
-    const byContent = assignLinesByContent(lines);
-    return scoreParsedLabelFields(byContent) > scoreParsedLabelFields(positional)
-      ? byContent
-      : positional;
+    });
+    candidates.push(assignLinesByContent(lines));
+  } else if (lines.length >= 1) {
+    candidates.push(assignLinesByContent(lines));
   }
 
-  if (lines.length === 2) {
-    return assignLinesByContent(lines);
-  }
-
-  if (lines.length === 1) {
-    return assignLinesByContent(lines);
-  }
-
-  return { job: "", fabric: "", size: "" };
+  candidates.sort((a, b) => scoreParsedLabelFields(b) - scoreParsedLabelFields(a));
+  return candidates[0] ?? { job: "", fabric: "", size: "" };
 }
 
 /** True when line 1 probably still needs a human fix. */
@@ -1362,11 +1441,17 @@ export function looksLikeWeakJobLine(job: string): boolean {
 }
 
 export function looksLikeWeakFabricLine(fabric: string): boolean {
-  return fabric.trim().length < 3;
+  const trimmed = fabric.trim();
+  if (trimmed.length < 3) return true;
+  if (trimmed.includes("/")) return true;
+  return scoreFabricCandidate(trimmed) < 60;
 }
 
 export function looksLikeWeakSizeLine(size: string): boolean {
-  return !extractDimensions(size);
+  const trimmed = size.trim();
+  if (!trimmed) return true;
+  if (trimmed.includes("/")) return true;
+  return !extractDimensions(trimmed);
 }
 
 /** Split combined label OCR into the three common sticker lines. */
