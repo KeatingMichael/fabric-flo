@@ -1,67 +1,60 @@
-# Handwritten label OCR (free cloud options)
+# Handwritten label OCR (cloud)
 
-Fabric Flo reads rental-house stickers (job number, fabric type, size). **Handwritten label** is
-the default on the Scan screen.
+Fabric Flo reads rental-house stickers (job number, fabric type, size) with the **Scan** camera.
+Cloud OCR fills the three fields; crew tap to fix any line before **Add to Log**.
 
-## Free options (pick one)
+## Recommended: Google Cloud Vision (~2 seconds, best accuracy)
 
-| Option | Cost | Credit card? | Monthly limit | Best for |
-|--------|------|--------------|---------------|----------|
-| **OCR.space** (recommended to start) | **$0** | **No** | 25,000 scans (~500/day) | Side project, one production, no billing setup |
-| **Google Cloud Vision** | **$0** then ~$1.50/1k | Yes (billing account) | **1,000 free**, then paid | Highest accuracy; fine if you stay under 1k scans/mo |
-| **On-device only** (no setup) | **$0** | No | Unlimited | Offline; weaker on messy handwriting — tap to fix lines |
-| **Native iOS/Android app** (future) | **$0** | No | Unlimited | Apple Vision / ML Kit on phone — best free offline when the App Store build ships |
+Google gives **1,000 document-text scans per month free**. After that it is about **$1.50 per
+1,000 scans**. You need a billing account (card on file) but you are **not charged** while you stay
+under 1,000 scans/month.
 
-The live web app tries **cloud OCR first** (when you’re signed in and a key is configured), then
-falls back to on-device Tesseract automatically.
+### What you do (one-time, ~10 minutes)
 
----
+1. Open [Google Cloud Console](https://console.cloud.google.com/).
+2. Create a project (or pick an existing one).
+3. **APIs & Services → Library** → search **Cloud Vision API** → **Enable**.
+4. **APIs & Services → Billing** → link a billing account (required for Vision; free tier still
+   applies).
+5. **APIs & Services → Credentials → Create credentials → API key**.
+6. Click the new key → **Restrict key** → **Cloud Vision API** only → Save.
+7. Copy the API key.
 
-## Easiest free setup: OCR.space (~5 minutes)
+### Add the key to Supabase
 
-No Google account. No credit card.
-
-### 1. Get a free API key
-
-1. Open [ocr.space/ocrapi](https://ocr.space/ocrapi).
-2. Register for a **free API key** (25,000 requests/month).
-
-### 2. Add the secret in Supabase
-
-[Supabase Dashboard](https://supabase.com/dashboard) → your project → **Edge Functions** →
-**Secrets**:
-
-```text
-OCR_SPACE_API_KEY=paste_your_key_here
-```
-
-### 3. Deploy the Edge Function
-
-From the repo root (Supabase CLI linked to your project):
+Project **`zfrekjlqpkipuoliptpd`** (Fabric Flo) — from the repo root with Supabase CLI logged in:
 
 ```bash
-supabase functions deploy label-ocr
+supabase secrets set GOOGLE_VISION_API_KEY=paste_your_key_here --project-ref zfrekjlqpkipuoliptpd
+supabase functions deploy label-ocr --project-ref zfrekjlqpkipuoliptpd
 ```
 
-### 4. Test
+Or in [Supabase Dashboard](https://supabase.com/dashboard/project/zfrekjlqpkipuoliptpd/settings/functions)
+→ **Edge Functions → Secrets** → add `GOOGLE_VISION_API_KEY`, then deploy `label-ocr`.
 
-1. Sign in at `/app` on **fabricflo-app.com**.
-2. Scan → **Handwritten label** → photograph a test sticker.
-3. All three lines should be much closer than on-device OCR alone.
+### Test
+
+1. Pull to refresh **fabricflo-app.com** on your phone (or clear Safari site data once).
+2. Sign in → open a production → **Scan → Rental label**.
+3. Fill the white sticker in frame → **Scan**. Fields should fill in about **2–5 seconds**.
+
+Keep your existing `OCR_SPACE_API_KEY` if you have one — it becomes automatic fallback if Vision
+ever fails.
 
 ---
 
-## Alternative: Google Cloud Vision (also free at low volume)
+## Free fallback: OCR.space (no credit card)
 
-Google gives **1,000 document-text scans per month free** (resets monthly). You need a billing
-account with a card on file, but you are **not charged** while you stay under 1,000 scans/month.
+| | OCR.space | Google Vision |
+|--|-----------|---------------|
+| Cost | $0 | $0 then ~$1.50/1k |
+| Card required | No | Yes (billing account) |
+| Speed | ~3–5s | ~1–3s |
+| Handwriting | OK | Better |
 
-1. [Google Cloud Console](https://console.cloud.google.com/) → enable **Cloud Vision API** → create
-   an API key (restrict to Vision only).
-2. Supabase secret: `GOOGLE_VISION_API_KEY=your_key`
-3. Deploy: `supabase functions deploy label-ocr`
-
-If **both** keys are set, Google is tried first; OCR.space is the fallback.
+1. Register at [ocr.space/ocrapi](https://ocr.space/ocrapi) (25,000 requests/month free).
+2. `supabase secrets set OCR_SPACE_API_KEY=your_key --project-ref zfrekjlqpkipuoliptpd`
+3. `supabase functions deploy label-ocr --project-ref zfrekjlqpkipuoliptpd`
 
 ---
 
@@ -69,10 +62,9 @@ If **both** keys are set, Google is tried first; OCR.space is the fallback.
 
 | When | Engine |
 |------|--------|
-| Signed in + online + cloud key configured | OCR.space or Google Vision |
-| Offline or no cloud key | On-device Tesseract |
-
-Crew can always edit the three fields before **Continue to Fabrics**.
+| Signed in + online + `GOOGLE_VISION_API_KEY` set | Google Vision (primary) |
+| Vision miss / error + `OCR_SPACE_API_KEY` set | OCR.space (fallback) |
+| Offline or not signed in | Tap fields manually |
 
 ---
 
@@ -80,9 +72,10 @@ Crew can always edit the three fields before **Continue to Fabrics**.
 
 | Symptom | Fix |
 |---------|-----|
-| Still poor reads while signed in | Deploy `label-ocr` and set `OCR_SPACE_API_KEY` or `GOOGLE_VISION_API_KEY` |
-| Works on web but not PWA | Clear Safari site data and reload |
-| “No text detected” | Brighter light, white label fills the frame, tap SCAN again |
-| Line 1 wrong, 2–3 right | Tap line 1 and type the sticker number — normal on very messy writing |
+| “Couldn’t read” / empty fields | Confirm secret is set and `label-ocr` redeployed after adding the key |
+| Vision billing error in Supabase logs | Enable billing + Cloud Vision API in Google Cloud |
+| Slow reads | Vision should be ~2s; check phone signal; pull to refresh PWA |
+| Wrong fabric line (e.g. SOLO) | Tap **Fabric** and fix — or pick from suggestions |
+| Sync dialog mid-scan | Pull latest app; should only appear once per sign-in |
 
 See also [`docs/BACKEND_SETUP.md`](BACKEND_SETUP.md).

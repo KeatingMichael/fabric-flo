@@ -45,9 +45,8 @@ export type LabelScanOutcome = LabelOcrCloudOutcome & { message: string };
 
 export type ScanReadPhase = "cloud" | "phone";
 
-const CLOUD_OCR_TIMEOUT_MS = 5_000;
-const SCAN_CLOUD_MAX_EDGE = 1600;
-const SCAN_CLOUD_THUMB_EDGE = 900;
+const CLOUD_OCR_TIMEOUT_MS = 6_000;
+const SCAN_CLOUD_MAX_EDGE = 1800;
 const EMPTY_FIELDS: LabelOcrFields = { job: "", fabric: "", size: "" };
 
 function withTimeout<T>(promise: Promise<T>, ms: number, fallback: T): Promise<T> {
@@ -121,10 +120,9 @@ function prepareCloudRequest(
   _jpegDataUrl?: string
 ): LabelOcrRequest {
   const cropped = autoCropLabelRegion(source);
-  const forStrips = scaleCanvas(cropped, SCAN_CLOUD_MAX_EDGE);
-  const stripsBase64 = stripBase64Payload(forStrips);
-  const thumb = scaleCanvas(cropped, SCAN_CLOUD_THUMB_EDGE);
-  const imageBase64 = shrinkJpegForCloud(thumb).replace(/^data:image\/\w+;base64,/, "");
+  const scaled = scaleCanvas(cropped, SCAN_CLOUD_MAX_EDGE);
+  const stripsBase64 = stripBase64Payload(scaled);
+  const imageBase64 = shrinkJpegForCloud(scaled).replace(/^data:image\/\w+;base64,/, "");
   return { imageBase64, stripsBase64 };
 }
 

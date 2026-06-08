@@ -1,12 +1,15 @@
 /**
  * Handwriting OCR for rental labels (Supabase Edge Function).
  *
- * Deploy: supabase functions deploy label-ocr
+ * Deploy: supabase functions deploy label-ocr --project-ref YOUR_PROJECT_REF
  *
- * Set ONE of these secrets (OCR.space is easiest — no credit card):
- *   supabase secrets set OCR_SPACE_API_KEY=your_key
+ * Recommended (fast + accurate):
  *   supabase secrets set GOOGLE_VISION_API_KEY=your_key
  *
+ * Free fallback (slower):
+ *   supabase secrets set OCR_SPACE_API_KEY=your_key
+ *
+ * If both are set, Google Vision runs first; OCR.space is fallback.
  * Requires Authorization: Bearer <user JWT>.
  */
 import { createClient } from "https://esm.sh/@supabase/supabase-js@2.49.1";
@@ -19,6 +22,7 @@ const cors = {
 type VisionResponse = {
   responses?: Array<{
     fullTextAnnotation?: { text?: string };
+    textAnnotations?: Array<{ description?: string }>;
     error?: { message?: string };
   }>;
 };
@@ -76,8 +80,10 @@ Deno.serve(async (req) => {
     const strips = body.stripsBase64?.filter((s) => s && s.length > 32) ?? [];
 
     if (visionKey) {
-      const googleText = await runGoogleVision(visionKey, imageBase64);
-      if (googleText) return json({ text: googleText, rawText: googleText, provider: "google" });
+      const googleText = await runGoogleVisionPrimary(visionKey, imageBase64, strips);
+      if (googleText) {
+        return json({ text: googleText, rawText: googleText, provider: "google" });
+      }
     }
 
     if (ocrSpaceKey) {
@@ -93,32 +99,70 @@ Deno.serve(async (req) => {
   }
 });
 
-async function runGoogleVision(apiKey: string, imageBase64: string): Promise<string | null> {
+/** One full-image call, then one batched strip call if lines are sparse. */
+async function runGoogleVisionPrimary(
+  apiKey: string,
+  imageBase64: string,
+  stripsBase64: string[]
+): Promise<string | null> {
+  const fullText = await runGoogleVisionBatch(apiKey, [imageBase64]);
+  if (fullText && countUsefulLines(fullText) >= 2) return fullText;
+
+  if (stripsBase64.length >= 3) {
+    const stripText = await runGoogleVisionBatch(apiKey, stripsBase64.slice(0, 3));
+    if (stripText) {
+      return mergeOcrTexts([fullText ?? "", stripText]);
+    }
+  }
+
+  return fullText;
+}
+
+function countUsefulLines(text: string): number {
+  return text
+    .split(/\r?\n/)
+    .map((line) => line.trim())
+    .filter((line) => line.length >= 2).length;
+}
+
+async function runGoogleVisionBatch(apiKey: string, imagesBase64: string[]): Promise<string | null> {
+  if (!imagesBase64.length) return null;
+
   const visionRes = await fetch(
     `https://vision.googleapis.com/v1/images:annotate?key=${apiKey}`,
     {
       method: "POST",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({
-        requests: [
-          {
-            image: { content: imageBase64 },
-            features: [{ type: "DOCUMENT_TEXT_DETECTION", maxResults: 1 }],
-            imageContext: { languageHints: ["en"] },
-          },
-        ],
+        requests: imagesBase64.map((content) => ({
+          image: { content },
+          features: [{ type: "DOCUMENT_TEXT_DETECTION", maxResults: 1 }],
+          imageContext: { languageHints: ["en"] },
+        })),
       }),
     }
   );
 
-  if (!visionRes.ok) return null;
+  if (!visionRes.ok) {
+    const errBody = await visionRes.text();
+    console.warn("Google Vision HTTP", visionRes.status, errBody.slice(0, 240));
+    return null;
+  }
 
   const vision = (await visionRes.json()) as VisionResponse;
-  const block = vision.responses?.[0];
-  if (block?.error?.message) return null;
+  const chunks: string[] = [];
 
-  const text = block?.fullTextAnnotation?.text?.trim() ?? "";
-  return text || null;
+  for (const block of vision.responses ?? []) {
+    if (block?.error?.message) {
+      console.warn("Google Vision block error:", block.error.message);
+      continue;
+    }
+    const text = block?.fullTextAnnotation?.text?.trim();
+    if (text) chunks.push(text);
+  }
+
+  if (!chunks.length) return null;
+  return mergeOcrTexts(chunks);
 }
 
 async function runOcrSpaceCombined(
