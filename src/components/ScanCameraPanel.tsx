@@ -112,13 +112,14 @@ export function ScanCameraPanel({
       const hasFields = Boolean(outcome.fields.job || outcome.fields.fabric || outcome.fields.size);
       const ok = outcome.status === "success" || outcome.status === "partial";
 
-      setReadBanner({ message: outcome.message, ok });
+      setReadBanner({ message: outcome.message, ok: hasFields && ok });
+
+      onLabelFields?.(outcome.fields);
+      onLabelText?.([outcome.fields.job, outcome.fields.fabric, outcome.fields.size].filter(Boolean).join(" / "));
+      onLabelScan?.(outcome);
 
       if (hasFields) {
         hapticSuccess();
-        onLabelFields?.(outcome.fields);
-        onLabelText?.([outcome.fields.job, outcome.fields.fabric, outcome.fields.size].filter(Boolean).join(" / "));
-        onLabelScan?.(outcome);
         onError?.(ok ? null : outcome.message);
       } else {
         onError?.(outcome.message);

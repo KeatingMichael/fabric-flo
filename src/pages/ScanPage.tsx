@@ -66,6 +66,7 @@ export function ScanPage() {
   const [savedFlash, setSavedFlash] = useState<{ itemName: string; locationLabel: string } | null>(
     null
   );
+  const [scanAttempted, setScanAttempted] = useState(false);
 
   const labelDraft = joinLabelFields(labelJob, labelFabric, labelSize);
   const scanText = (mode === "qr" ? manual : labelDraft).trim();
@@ -134,6 +135,7 @@ export function ScanPage() {
     setLabelJob("");
     setLabelFabric("");
     setLabelSize("");
+    setScanAttempted(false);
   }
 
   function addToLog() {
@@ -325,16 +327,21 @@ export function ScanPage() {
           setLabelJob(fields.job);
           setLabelFabric(fields.fabric);
           setLabelSize(fields.size);
-          if (looksLikeWeakJobLine(fields.job)) focusFieldAfterScan.current = "job";
-          else if (looksLikeWeakFabricLine(fields.fabric)) focusFieldAfterScan.current = "fabric";
-          else if (looksLikeWeakSizeLine(fields.size)) focusFieldAfterScan.current = "size";
         }}
         onLabelScan={(outcome) => {
+          setScanAttempted(true);
+          setLabelJob(outcome.fields.job);
+          setLabelFabric(outcome.fields.fabric);
+          setLabelSize(outcome.fields.size);
           if (outcome.status === "success" || outcome.status === "partial") {
             setError(null);
           }
+          if (looksLikeWeakJobLine(outcome.fields.job)) focusFieldAfterScan.current = "job";
+          else if (looksLikeWeakFabricLine(outcome.fields.fabric)) focusFieldAfterScan.current = "fabric";
+          else if (looksLikeWeakSizeLine(outcome.fields.size)) focusFieldAfterScan.current = "size";
+          else if (!outcome.fields.job) focusFieldAfterScan.current = "job";
           window.requestAnimationFrame(() => {
-            readSectionRef.current?.scrollIntoView({ behavior: "smooth", block: "nearest" });
+            readSectionRef.current?.scrollIntoView({ behavior: "smooth", block: "start" });
           });
         }}
         onError={setError}
@@ -354,8 +361,21 @@ export function ScanPage() {
         <p style={{ marginBottom: 0 }}>
           {mode === "qr"
             ? "If the camera is unavailable, paste the QR JSON or code here."
-            : "Fix anything the camera missed, then Add to Log to save and scan the next piece."}
+            : scanAttempted
+              ? "White text below is what the camera read — tap any box to fix it, then Add to Log."
+              : "After SCAN, editable fields appear here. You can always type from the sticker too."}
         </p>
+        {scanAttempted && (labelJob || labelFabric || labelSize) ? (
+          <div className="scan-readout scan-readout--ok" role="status">
+            {labelJob ? <div><span className="muted">Job</span> {labelJob}</div> : null}
+            {labelFabric ? <div><span className="muted">Fabric</span> {labelFabric}</div> : null}
+            {labelSize ? <div><span className="muted">Size</span> {labelSize}</div> : null}
+          </div>
+        ) : scanAttempted ? (
+          <div className="scan-readout scan-readout--warn" role="status">
+            Camera didn&apos;t catch text — tap each box below and type from the sticker.
+          </div>
+        ) : null}
         {!hasPlaces ? (
           <div className="card stack" style={{ borderColor: "rgba(251,191,36,0.35)" }}>
             <strong style={{ color: "var(--warning)" }}>Add a place first</strong>
@@ -448,8 +468,8 @@ export function ScanPage() {
               <input
                 ref={jobInputRef}
                 id="label-job"
-                className="input"
-                placeholder="e.g. 111023"
+                className={`input${labelJob.trim() ? " input--filled" : scanAttempted ? " input--needs-entry" : ""}`}
+                placeholder={scanAttempted ? "Type job number" : "e.g. 111023"}
                 value={labelJob}
                 onChange={(e) => setLabelJob(e.target.value)}
                 inputMode="numeric"
@@ -461,8 +481,8 @@ export function ScanPage() {
               <input
                 id="label-fabric"
                 ref={fabricInputRef}
-                className="input"
-                placeholder="e.g. SOLID"
+                className={`input${labelFabric.trim() ? " input--filled" : scanAttempted ? " input--needs-entry" : ""}`}
+                placeholder={scanAttempted ? "Type fabric" : "e.g. SOLID"}
                 value={labelFabric}
                 onChange={(e) => setLabelFabric(e.target.value)}
                 list="label-fabric-hints"
@@ -480,8 +500,8 @@ export function ScanPage() {
               <input
                 id="label-size"
                 ref={sizeInputRef}
-                className="input"
-                placeholder={"e.g. 12' x 12'"}
+                className={`input${labelSize.trim() ? " input--filled" : scanAttempted ? " input--needs-entry" : ""}`}
+                placeholder={scanAttempted ? "Type size" : "e.g. 12' x 12'"}
                 value={labelSize}
                 onChange={(e) => setLabelSize(e.target.value)}
                 autoComplete="off"

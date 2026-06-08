@@ -132,8 +132,13 @@ async function recognizeLabelFieldsCloudInner(jpegDataUrl: string): Promise<Labe
     });
 
     if (error) {
+      console.warn("label-ocr invoke error:", error);
       if (isInvokeTransportError(error)) {
         return { fields: EMPTY_FIELDS, status: "error" };
+      }
+      const msg = typeof error.message === "string" ? error.message : "";
+      if (msg.includes("401") || msg.includes("not_authenticated")) {
+        return { fields: EMPTY_FIELDS, status: "not_signed_in" };
       }
       return { fields: EMPTY_FIELDS, status: "error" };
     }
