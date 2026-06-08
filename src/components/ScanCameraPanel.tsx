@@ -1,5 +1,6 @@
 import { useEffect, useRef, useState } from "react";
-import { hapticLight } from "@/lib/haptics";
+import { playCameraShutter } from "@/lib/cameraFeedback";
+import { hapticCameraCapture, hapticSuccess } from "@/lib/haptics";
 import { cropVideoFrameToGuide, recognizeLabelFromImage } from "@/lib/labelOcr";
 import { captureVideoFrame, decodeQrFromCanvas } from "@/lib/scanQrFromImage";
 
@@ -12,11 +13,19 @@ type Props = {
   onError?: (message: string | null) => void;
 };
 
+function triggerCaptureFeedback(setFlash: (on: boolean) => void): void {
+  hapticCameraCapture();
+  playCameraShutter();
+  setFlash(true);
+  window.setTimeout(() => setFlash(false), 120);
+}
+
 export function ScanCameraPanel({ mode, onQrDecoded, onLabelText, onError }: Props) {
   const videoRef = useRef<HTMLVideoElement>(null);
   const [ready, setReady] = useState(false);
   const [busy, setBusy] = useState(false);
   const [preview, setPreview] = useState<string | null>(null);
+  const [flash, setFlash] = useState(false);
 
   useEffect(() => {
     let stream: MediaStream | null = null;
@@ -55,6 +64,8 @@ export function ScanCameraPanel({ mode, onQrDecoded, onLabelText, onError }: Pro
   async function onScan() {
     const video = videoRef.current;
     if (!video || !ready || busy) return;
+
+    triggerCaptureFeedback(setFlash);
     setBusy(true);
     setPreview(null);
     onError?.(null);
@@ -69,7 +80,7 @@ export function ScanCameraPanel({ mode, onQrDecoded, onLabelText, onError }: Pro
           onError?.("No QR code in frame — center the code and tap SCAN again.");
           return;
         }
-        hapticLight();
+        hapticSuccess();
         onQrDecoded(text.trim());
         return;
       }
@@ -79,7 +90,7 @@ export function ScanCameraPanel({ mode, onQrDecoded, onLabelText, onError }: Pro
         onError?.("No text detected — try brighter light, closer framing, or type the label below.");
         return;
       }
-      hapticLight();
+      hapticSuccess();
       onLabelText(text);
     } catch (e) {
       onError?.(e instanceof Error ? e.message : "Could not read scan.");
@@ -103,6 +114,7 @@ export function ScanCameraPanel({ mode, onQrDecoded, onLabelText, onError }: Pro
           <span className="scan-corner scan-corner--bl" />
           <span className="scan-corner scan-corner--br" />
         </div>
+        <div className={`scan-viewfinder__flash${flash ? " scan-viewfinder__flash--on" : ""}`} aria-hidden />
         {!ready ? (
           <div className="scan-viewfinder__loading muted">Starting camera…</div>
         ) : null}
@@ -110,7 +122,11 @@ export function ScanCameraPanel({ mode, onQrDecoded, onLabelText, onError }: Pro
           type="button"
           className="btn btn-primary scan-viewfinder__scan-btn"
           disabled={!ready || busy}
-          onClick={() => void onScan()}
+          onPointerDown={(e) => {
+            e.preventDefault();
+            if (!ready || busy) return;
+            void onScan();
+          }}
         >
           {busy ? "Scanning…" : "SCAN"}
         </button>

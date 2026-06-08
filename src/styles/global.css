@@ -774,6 +774,28 @@ p {
   box-shadow:
     0 4px 24px rgba(56, 189, 248, 0.45),
     0 2px 8px rgba(0, 0, 0, 0.35);
+  touch-action: manipulation;
+  -webkit-user-select: none;
+  user-select: none;
+}
+
+.scan-viewfinder__scan-btn:active:not(:disabled) {
+  transform: translateX(-50%) scale(0.96);
+  opacity: 0.92;
+}
+
+.scan-viewfinder__flash {
+  position: absolute;
+  inset: 0;
+  z-index: 3;
+  pointer-events: none;
+  background: rgba(255, 255, 255, 0.88);
+  opacity: 0;
+  transition: opacity 0.06s ease-out;
+}
+
+.scan-viewfinder__flash--on {
+  opacity: 1;
 }
 
 .scan-viewfinder__scan-btn:disabled {

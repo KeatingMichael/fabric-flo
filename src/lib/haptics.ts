@@ -74,6 +74,22 @@ export function hapticSuccess(): void {
   })();
 }
 
+/** Scan button — camera capture (shutter + medium tap). */
+export function hapticCameraCapture(): void {
+  void (async () => {
+    const mod = await loadHaptics();
+    if (mod) {
+      try {
+        await mod.Haptics.impact({ style: mod.ImpactStyle.Medium });
+      } catch {
+        /* ignore */
+      }
+    } else {
+      webVibrate([14, 24, 10]);
+    }
+  })();
+}
+
 /** Validation or recoverable errors. */
 export function hapticWarning(): void {
   void (async () => {

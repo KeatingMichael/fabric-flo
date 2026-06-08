@@ -342,6 +342,33 @@ function scoreReadableLine(line: string): number {
   return score;
 }
 
+function cropVerticalBand(
+  source: HTMLCanvasElement,
+  yStartFraction: number,
+  heightFraction: number
+): HTMLCanvasElement {
+  const y = Math.round(source.height * yStartFraction);
+  const h = Math.max(1, Math.round(source.height * heightFraction));
+  const out = document.createElement("canvas");
+  out.width = source.width;
+  out.height = Math.min(h, source.height - y);
+  out.getContext("2d")!.drawImage(source, 0, y, source.width, out.height, 0, 0, source.width, out.height);
+  return out;
+}
+
+function extractBestJobNumber(text: string): string | null {
+  const normalized = text.replace(/[Oo]/g, "0").replace(/[Il|]/g, "1");
+  const runs = normalized.match(/\d+/g) ?? [];
+  const sorted = [...runs].sort((a, b) => b.length - a.length);
+  for (const run of sorted) {
+    if (run.length >= 5 && run.length <= 8) return run;
+  }
+  for (const run of sorted) {
+    if (run.length >= 4 && run.length <= 8) return run;
+  }
+  return lettersToJobDigits(text);
+}
+
 function lettersToJobDigits(line: string): string | null {
   const compact = line.replace(/\s/g, "").toUpperCase();
   if (!/^[A-Z]{4,8}$/.test(compact)) return null;
@@ -386,8 +413,9 @@ function repairFabricLine(line: string): string {
   if (keyword) return keyword;
   const compact = upper.replace(/[^A-Z]/g, "");
   for (const kw of FABRIC_KEYWORDS) {
-    if (levenshtein(compact, kw) <= 2) return kw;
+    if (levenshtein(compact, kw) <= 3) return kw;
   }
+  if (/^O+L+$|^SO?L+$|^SOU?D$|^S0LID$/i.test(compact)) return "SOLID";
   return trimmed;
 }
 
@@ -396,12 +424,11 @@ function repairSizeLine(line: string): string {
   const direct = extractDimensions(trimmed);
   if (direct) return direct;
 
-  const short = trimmed.match(/^(\d)\s*[xX]\s*(\d{2})$/);
-  if (short) {
-    const [, lead, tail] = short;
-    if (tail === "12" || tail === "10" || tail === "08" || lead === tail[0]) {
-      return `${tail}' X ${tail}'`;
-    }
+  const partial = trimmed.match(/^(\d)\s*'?\s*[xX]\s*'?\s*(\d{1,2})'?$/);
+  if (partial) {
+    const tail = partial[2]!;
+    if (tail.length === 2) return `${tail}' X ${tail}'`;
+    return `${partial[1]}' X ${tail}'`;
   }
 
   const digits = trimmed.match(/\d+/g);
@@ -413,15 +440,7 @@ function repairSizeLine(line: string): string {
 }
 
 function extractJobNumber(text: string): string | null {
-  const normalized = text.replace(/[Oo]/g, "0").replace(/[Il|]/g, "1");
-  const runs = normalized.match(/\d{5,8}/g) ?? [];
-  for (const run of runs) {
-    if (run.length >= 5 && run.length <= 7) return run;
-  }
-  const short = normalized.match(/\d{4,8}/g) ?? [];
-  const best = short.sort((a, b) => b.length - a.length)[0];
-  if (best) return best;
-  return lettersToJobDigits(text);
+  return extractBestJobNumber(text);
 }
 
 function extractFabricKeyword(text: string): string | null {
@@ -493,16 +512,34 @@ export function extractLabelFields(raw: string): string {
   return tokens.join(" / ");
 }
 
-function repairLabelParts(lines: string[]): string {
-  if (!lines.length) return "";
+function repairLabelParts(lines: string[], rawContext = ""): string {
+  if (!lines.length && !rawContext) return "";
+  const context = `${rawContext}\n${lines.join("\n")}`;
+  const tokens: string[] = [];
+
+  const job =
+    extractBestJobNumber(context) ??
+    (lines[0] ? repairJobLine(lines[0]) : null);
+  if (job && job.replace(/\D/g, "").length >= 4) tokens.push(job.replace(/\D/g, ""));
+
+  const fabric =
+    extractFabricKeyword(context) ??
+    (lines[1] ? repairFabricLine(lines[1]) : lines[0] ? repairFabricLine(lines[0]) : null);
+  if (fabric && !tokens.includes(fabric)) tokens.push(fabric);
+
+  const size =
+    extractDimensions(context) ??
+    (lines[2] ? repairSizeLine(lines[2]) : lines[1] ? repairSizeLine(lines[1]) : null);
+  if (size && !tokens.includes(size)) tokens.push(size);
+
+  if (tokens.length >= 2) return tokens.join(" / ");
+
   const repaired = lines.map((line, index) => {
     if (index === 0) return repairJobLine(line);
     if (index === 1 && lines.length >= 2) return repairFabricLine(line);
     if (index >= 2) return repairSizeLine(line);
     return normalizeLine(line);
   });
-  const structured = extractLabelFields(repaired.join("\n"));
-  if (scoreLabelText(structured) >= 70) return structured;
   return repaired.filter(Boolean).join(" / ");
 }
 
@@ -510,7 +547,7 @@ function joinReadableLines(lines: string[]): string {
   const kept = lines
     .map((line) => normalizeLine(line))
     .filter((line) => scoreReadableLine(line) >= 28);
-  if (kept.length >= 2) return repairLabelParts(kept);
+  if (kept.length >= 2) return repairLabelParts(kept, "");
   if (kept.length === 1 && kept[0]!.length >= 3) return kept[0]!;
   return "";
 }
@@ -673,7 +710,7 @@ async function runStripOcr(
     if (line.length >= 2) lines.push(line);
   }
 
-  const text = repairLabelParts(lines);
+  const text = repairLabelParts(lines, "");
   return {
     text,
     confidence: text ? 75 : 0,
@@ -692,7 +729,7 @@ function pickBestAttempt(attempts: OcrAttempt[]): string {
   const best = viable[0]!.text;
   const parts = best.split("/").map((p) => p.trim()).filter(Boolean);
   if (parts.length >= 2) {
-    const repaired = repairLabelParts(parts);
+    const repaired = repairLabelParts(parts, best);
     if (scoreLabelText(repaired) >= scoreLabelText(best)) return repaired;
   }
   const structured = extractLabelFields(best);
@@ -720,12 +757,34 @@ export async function recognizeLabelFromImage(
   const rawChunks: string[] = [];
 
   try {
+    const jobBand = cropVerticalBand(canvas, 0, 0.38);
+    for (const variant of [preprocessLabelBinarize(jobBand), preprocessLabelContrast(jobBand)]) {
+      const digits = (await recognizeStripRaw(worker, variant, DIGIT_WHITELIST)).replace(/\D/g, "");
+      rawChunks.push(digits);
+      if (digits.length >= 5) {
+        attempts.push({
+          text: repairLabelParts([], digits),
+          confidence: 80,
+          labelScore: scoreLabelText(digits),
+        });
+      }
+    }
+
     for (const variant of variants) {
       const strip3 = await runStripOcr(worker, variant, 3);
       attempts.push(strip3);
       rawChunks.push(strip3.text);
 
-      if (strip3.labelScore >= 95) return pickBestAttempt(attempts);
+      if (strip3.labelScore >= 95) {
+        return pickBestAttempt([
+          ...attempts,
+          {
+            text: repairLabelParts(strip3.text.split("/").map((p) => p.trim()), rawChunks.join("\n")),
+            confidence: 85,
+            labelScore: scoreLabelText(repairLabelParts(strip3.text.split("/").map((p) => p.trim()), rawChunks.join("\n"))),
+          },
+        ]);
+      }
 
       const block = await runOcrPass(worker, variant, PSM.SINGLE_BLOCK);
       attempts.push(block);
@@ -740,10 +799,11 @@ export async function recognizeLabelFromImage(
     }
 
     const structuredFromAll = extractLabelFields(rawChunks.join("\n"));
+    const mergedFromRaw = repairLabelParts([], rawChunks.join("\n"));
     attempts.push({
-      text: structuredFromAll,
-      confidence: structuredFromAll ? 75 : 0,
-      labelScore: scoreLabelText(structuredFromAll),
+      text: scoreLabelText(mergedFromRaw) >= scoreLabelText(structuredFromAll) ? mergedFromRaw : structuredFromAll,
+      confidence: structuredFromAll || mergedFromRaw ? 75 : 0,
+      labelScore: Math.max(scoreLabelText(structuredFromAll), scoreLabelText(mergedFromRaw)),
     });
 
     return pickBestAttempt(attempts);
