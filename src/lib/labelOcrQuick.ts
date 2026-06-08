@@ -108,9 +108,8 @@ export function hasAnyLabelField(fields: LabelOcrFields): boolean {
 }
 
 export function stripBase64Payload(source: HTMLCanvasElement): string[] {
-  const scaled = scaleCanvas(source, 2000);
-  return rentalLabelStrips(scaled).map((strip) => {
-    const url = strip.toDataURL("image/jpeg", 0.92);
+  return rentalLabelStrips(source).map((strip) => {
+    const url = strip.toDataURL("image/jpeg", 0.88);
     return url.replace(/^data:image\/\w+;base64,/, "");
   });
 }

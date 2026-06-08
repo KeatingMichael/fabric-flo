@@ -12,8 +12,6 @@ import {
 } from "@/lib/labelOcr";
 import {
   hasAnyLabelField,
-  mergeLabelFields,
-  readLabelOnPhone,
   stripBase64Payload,
 } from "@/lib/labelOcrQuick";
 import { FunctionsHttpError, getSupabase } from "@/lib/supabase";
@@ -47,9 +45,9 @@ export type LabelScanOutcome = LabelOcrCloudOutcome & { message: string };
 
 export type ScanReadPhase = "cloud" | "phone";
 
-const CLOUD_OCR_TIMEOUT_MS = 12_000;
-const PHONE_OCR_TIMEOUT_MS = 6_000;
-const SCAN_CLOUD_MAX_EDGE = 2600;
+const CLOUD_OCR_TIMEOUT_MS = 5_000;
+const SCAN_CLOUD_MAX_EDGE = 1600;
+const SCAN_CLOUD_THUMB_EDGE = 900;
 const EMPTY_FIELDS: LabelOcrFields = { job: "", fabric: "", size: "" };
 
 function withTimeout<T>(promise: Promise<T>, ms: number, fallback: T): Promise<T> {
@@ -120,51 +118,26 @@ function outcomeFromPayload(payload: LabelOcrResponse | null): LabelOcrCloudOutc
 
 function prepareCloudRequest(
   source: HTMLCanvasElement,
-  jpegDataUrl?: string
+  _jpegDataUrl?: string
 ): LabelOcrRequest {
   const cropped = autoCropLabelRegion(source);
-  const scaled = scaleCanvas(cropped, SCAN_CLOUD_MAX_EDGE);
-  const imageBase64 = shrinkJpegForCloud(scaled, jpegDataUrl).replace(/^data:image\/\w+;base64,/, "");
-  const stripsBase64 = stripBase64Payload(scaled);
+  const forStrips = scaleCanvas(cropped, SCAN_CLOUD_MAX_EDGE);
+  const stripsBase64 = stripBase64Payload(forStrips);
+  const thumb = scaleCanvas(cropped, SCAN_CLOUD_THUMB_EDGE);
+  const imageBase64 = shrinkJpegForCloud(thumb).replace(/^data:image\/\w+;base64,/, "");
   return { imageBase64, stripsBase64 };
 }
 
-function mergeOutcomes(cloud: LabelOcrCloudOutcome, phone: LabelOcrFields): LabelOcrCloudOutcome {
-  const fields = mergeLabelFields(cloud.fields, phone);
-  if (!hasAnyLabelField(fields)) {
-    return { fields: EMPTY_FIELDS, status: cloud.status === "not_signed_in" ? "not_signed_in" : "no_text" };
-  }
-  return { fields, status: scoreFields(fields) };
-}
-
-function labelFieldsComplete(fields: LabelOcrFields): boolean {
-  return Boolean(fields.job && fields.fabric && fields.size);
-}
-
-/** Cloud first; phone OCR only when cloud misses, both capped by timeout. */
+/** Fast cloud-only label read — target ~5s end-to-end. */
 export async function scanLabelFromCapture(
   source: HTMLCanvasElement,
   jpegDataUrl?: string,
   onPhase?: (phase: ScanReadPhase) => void
 ): Promise<LabelScanOutcome> {
-  const cropped = autoCropLabelRegion(source);
   const request = prepareCloudRequest(source, jpegDataUrl);
 
   onPhase?.("cloud");
-  const cloudOutcome = await recognizeLabelFieldsCloudWithStatus(request);
-
-  let phoneFields = EMPTY_FIELDS;
-  const cloudComplete =
-    labelFieldsComplete(cloudOutcome.fields) ||
-    cloudOutcome.status === "success" ||
-    (cloudOutcome.status === "partial" && hasAnyLabelField(cloudOutcome.fields));
-
-  if (!cloudComplete) {
-    onPhase?.("phone");
-    phoneFields = await withTimeout(readLabelOnPhone(cropped), PHONE_OCR_TIMEOUT_MS, EMPTY_FIELDS);
-  }
-
-  const outcome = mergeOutcomes(cloudOutcome, phoneFields);
+  const outcome = await recognizeLabelFieldsCloudWithStatus(request);
 
   return {
     ...outcome,
@@ -245,13 +218,13 @@ async function recognizeLabelFieldsCloudInner(request: LabelOcrRequest): Promise
 export function labelScanStatusMessage(status: LabelOcrCloudStatus): string {
   switch (status) {
     case "offline":
-      return "Offline — phone read only. Fix fields below if needed.";
+      return "Offline — type or fix the fields below.";
     case "not_signed_in":
-      return "Sign in from Home for cloud read — phone read may still fill fields.";
+      return "Sign in from Home to read labels with the camera.";
     case "timeout":
-      return "Slow connection — check the fields below.";
+      return "Slow connection — tap Scan again or fix fields below.";
     case "error":
-      return "Cloud missed — phone read may have filled fields. Tap to fix.";
+      return "Couldn’t read — tap Scan again or fix fields below.";
     case "no_text":
       return "Couldn’t read the sticker — hold the white label in frame and Scan again.";
     case "partial":

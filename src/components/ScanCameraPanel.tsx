@@ -12,7 +12,8 @@ import { captureVideoFrame, decodeQrFromCanvas } from "@/lib/scanQrFromImage";
 
 type ScanMode = "qr" | "label";
 
-const SCAN_HARD_CAP_MS = 20_000;
+const SCAN_HARD_CAP_MS = 6_000;
+const LABEL_FOCUS_MS = 150;
 
 type Props = {
   mode: ScanMode;
@@ -100,10 +101,10 @@ export function ScanCameraPanel({
 
     try {
       if (mode === "label") {
-        await new Promise((r) => window.setTimeout(r, 350));
+        await new Promise((r) => window.setTimeout(r, LABEL_FOCUS_MS));
       }
       const canvas = mode === "label" ? cropVideoFrameToGuide(video) : await captureVideoFrame(video);
-      const jpegDataUrl = canvas.toDataURL("image/jpeg", 0.95);
+      const jpegDataUrl = canvas.toDataURL("image/jpeg", mode === "label" ? 0.88 : 0.95);
 
       if (mode === "qr") {
         const text = await decodeQrFromCanvas(canvas);

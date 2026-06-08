@@ -126,30 +126,25 @@ async function runOcrSpaceCombined(
   imageBase64: string,
   stripsBase64: string[]
 ): Promise<string | null> {
-  if (imageBase64.length > 1_350_000 && !stripsBase64.length) return null;
-
-  const chunks: string[] = [];
-
   if (stripsBase64.length >= 3) {
     const stripTexts = await Promise.all(
       stripsBase64.slice(0, 3).map((strip) => runOcrSpaceEngine(apiKey, strip, "2"))
     );
-    const ordered = stripTexts.map((t) => t?.trim() ?? "").filter(Boolean);
-    if (ordered.length >= 2) {
-      return ordered.join("\n");
+    const ordered = stripTexts.map((t) => t?.trim() ?? "");
+    const filled = ordered.filter(Boolean);
+    if (filled.length >= 2) {
+      return filled.join("\n");
     }
-    chunks.push(...ordered);
+    if (filled.length === 1 && imageBase64.length <= 1_350_000) {
+      const full = await runOcrSpaceEngine(apiKey, imageBase64, "2");
+      if (full) return mergeOcrTexts([filled[0]!, full]);
+      return filled[0]!;
+    }
+    if (filled.length === 1) return filled[0]!;
   }
 
-  const fullResults = await Promise.all(
-    (["2", "1"] as const).map((engine) => runOcrSpaceEngine(apiKey, imageBase64, engine))
-  );
-  for (const text of fullResults) {
-    if (text) chunks.push(text);
-  }
-
-  if (!chunks.length) return null;
-  return mergeOcrTexts(chunks);
+  if (imageBase64.length > 1_350_000) return null;
+  return runOcrSpaceEngine(apiKey, imageBase64, "2");
 }
 
 function mergeOcrTexts(chunks: string[]): string {
