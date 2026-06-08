@@ -12,12 +12,16 @@ import {
 import { SyncStatusProvider } from "@/context/SyncStatusProvider";
 import App from "@/App";
 import { initNativeShell } from "@/lib/initNativeShell";
+import { initIosScrollFix } from "@/lib/iosScrollFix";
 import "@/styles/global.css";
 
 void initNativeShell();
 
-if (typeof window !== "undefined" && "scrollRestoration" in window.history) {
-  window.history.scrollRestoration = "manual";
+if (typeof window !== "undefined") {
+  if ("scrollRestoration" in window.history) {
+    window.history.scrollRestoration = "manual";
+  }
+  initIosScrollFix();
 }
 
 createRoot(document.getElementById("root")!).render(

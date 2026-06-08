@@ -20,9 +20,8 @@ export function SyncStatusBanner() {
   const showOffline = !sync.online;
   const showConflict = sync.versionConflict;
   const showError = sync.lastError && !showConflict;
-  const showSyncing = sync.syncing;
 
-  if (!showOffline && !showConflict && !showError && !showSyncing && !suppressAutoPush) {
+  if (!showOffline && !showConflict && !showError && !suppressAutoPush) {
     return null;
   }
 
@@ -72,8 +71,6 @@ export function SyncStatusBanner() {
     message = "Automatic save is paused on this phone. Open Fabric Flo account to save manually.";
   } else if (showConflict) {
     message = "This show was updated on another phone. Get the latest copy, or save this phone’s version again.";
-  } else if (showSyncing) {
-    message = "Saving to the cloud…";
   } else if (showError) {
     message = sync.lastError ?? "Could not save online.";
   }
