@@ -73,6 +73,18 @@ export default defineConfig({
   resolve: {
     alias: { "@": fileURLToPath(new URL("./src", import.meta.url)) },
   },
+  build: {
+    rollupOptions: {
+      output: {
+        /** Keep scan/cloud OCR in the main bundle — lazy chunks 404 under the PWA shell. */
+        manualChunks(id) {
+          if (id.includes("node_modules/tesseract.js")) return "tesseract";
+          if (id.includes("node_modules/pdfjs-dist")) return "pdf";
+          return undefined;
+        },
+      },
+    },
+  },
   optimizeDeps: {
     include: ["pdfjs-dist"],
   },

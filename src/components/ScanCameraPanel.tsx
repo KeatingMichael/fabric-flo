@@ -1,12 +1,12 @@
 import { useEffect, useRef, useState } from "react";
 import { playCameraShutter } from "@/lib/cameraFeedback";
 import { hapticCameraCapture, hapticSuccess } from "@/lib/haptics";
+import { cropVideoFrameToGuide } from "@/lib/labelOcr";
 import {
-  cropVideoFrameToGuide,
   scanLabelFromCapture,
-  type LabelOcrFields,
   type LabelScanOutcome,
-} from "@/lib/labelOcr";
+} from "@/lib/labelOcrCloud";
+import type { LabelOcrFields } from "@/lib/labelOcr";
 import { captureVideoFrame, decodeQrFromCanvas } from "@/lib/scanQrFromImage";
 
 type ScanMode = "qr" | "label";
@@ -124,7 +124,11 @@ export function ScanCameraPanel({
         onError?.(outcome.message);
       }
     } catch (e) {
-      const message = e instanceof Error ? e.message : "Could not read scan.";
+      const raw = e instanceof Error ? e.message : "Could not read scan.";
+      const message =
+        raw.includes("MIME type") || raw.includes("Failed to fetch") || raw.includes("Load failed")
+          ? "Could not reach label reading. Pull down to refresh the page, then try SCAN again — or type below."
+          : raw || "Could not read scan.";
       setReadBanner({ message, ok: false });
       onError?.(message);
     } finally {

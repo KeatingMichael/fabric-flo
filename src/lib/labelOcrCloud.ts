@@ -1,8 +1,12 @@
 import {
+  autoCropLabelRegion,
   looksLikeWeakFabricLine,
   looksLikeWeakJobLine,
   looksLikeWeakSizeLine,
   parseRawTextToLabelFields,
+  preprocessLabelContrast,
+  scaleCanvas,
+  shrinkJpegForCloud,
   type LabelOcrFields,
 } from "@/lib/labelOcr";
 import { getSupabase } from "@/lib/supabase";
@@ -26,7 +30,10 @@ export type LabelOcrCloudOutcome = {
   status: LabelOcrCloudStatus;
 };
 
+export type LabelScanOutcome = LabelOcrCloudOutcome & { message: string };
+
 const CLOUD_OCR_TIMEOUT_MS = 10_000;
+const SCAN_CLOUD_MAX_EDGE = 1600;
 const EMPTY_FIELDS: LabelOcrFields = { job: "", fabric: "", size: "" };
 
 function withTimeout<T>(promise: Promise<T>, ms: number, fallback: T): Promise<T> {
@@ -46,6 +53,34 @@ function scoreFields(fields: LabelOcrFields): LabelOcrCloudStatus {
     looksLikeWeakFabricLine(fields.fabric) ||
     looksLikeWeakSizeLine(fields.size);
   return weak ? "partial" : "success";
+}
+
+function isInvokeTransportError(error: unknown): boolean {
+  const msg = error instanceof Error ? error.message : String(error);
+  return (
+    msg.includes("MIME type") ||
+    msg.includes("Failed to fetch") ||
+    msg.includes("Load failed") ||
+    msg.includes("NetworkError")
+  );
+}
+
+/** Fast cloud-only label read for Scan — bundled here (no lazy chunk). */
+export async function scanLabelFromCapture(
+  source: HTMLCanvasElement,
+  jpegDataUrl?: string
+): Promise<LabelScanOutcome> {
+  const canvas = autoCropLabelRegion(source);
+  const ocrCanvas = preprocessLabelContrast(scaleCanvas(canvas, SCAN_CLOUD_MAX_EDGE));
+  const cloudDataUrl = shrinkJpegForCloud(
+    ocrCanvas,
+    jpegDataUrl ?? ocrCanvas.toDataURL("image/jpeg", 0.88)
+  );
+  const outcome = await recognizeLabelFieldsCloudWithStatus(cloudDataUrl);
+  return {
+    ...outcome,
+    message: labelScanStatusMessage(outcome.status, outcome.fields),
+  };
 }
 
 /** Cloud label OCR with explicit status — used by Scan (no slow phone-side OCR). */
@@ -96,13 +131,21 @@ async function recognizeLabelFieldsCloudInner(jpegDataUrl: string): Promise<Labe
       body: { imageBase64: base64 },
     });
 
-    if (error) return { fields: EMPTY_FIELDS, status: "error" };
+    if (error) {
+      if (isInvokeTransportError(error)) {
+        return { fields: EMPTY_FIELDS, status: "error" };
+      }
+      return { fields: EMPTY_FIELDS, status: "error" };
+    }
     if (data?.error === "vision_not_configured") return { fields: EMPTY_FIELDS, status: "error" };
     if (!data?.text?.trim()) return { fields: EMPTY_FIELDS, status: "no_text" };
 
     const fields = parseRawTextToLabelFields(data.text);
     return { fields, status: scoreFields(fields) };
-  } catch {
+  } catch (e) {
+    if (isInvokeTransportError(e)) {
+      return { fields: EMPTY_FIELDS, status: "error" };
+    }
     return { fields: EMPTY_FIELDS, status: "error" };
   }
 }
@@ -119,7 +162,7 @@ export function labelScanStatusMessage(
     case "timeout":
       return "Reading timed out. Fill the frame with the white label only, then tap SCAN again — or type below.";
     case "error":
-      return "Could not reach label reading. Check connection or type the label below.";
+      return "Could not reach label reading. Pull down to refresh the page, then try SCAN again — or type below.";
     case "no_text":
       return "No text found. Use good light, white paper only in frame, or type the label below.";
     case "partial": {

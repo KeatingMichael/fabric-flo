@@ -175,7 +175,7 @@ function cloneCanvas(source: HTMLCanvasElement): HTMLCanvasElement {
   return canvas;
 }
 
-function scaleCanvas(source: HTMLCanvasElement, targetLongEdge: number): HTMLCanvasElement {
+export function scaleCanvas(source: HTMLCanvasElement, targetLongEdge: number): HTMLCanvasElement {
   const scale = Math.max(1, targetLongEdge / Math.max(source.width, source.height));
   const w = Math.round(source.width * scale);
   const h = Math.round(source.height * scale);
@@ -1182,55 +1182,9 @@ function pickBestAttempt(attempts: OcrAttempt[]): string {
   return scoreLabelText(structured) > scoreLabelText(best) ? structured : best;
 }
 
-const SCAN_CLOUD_MAX_EDGE = 1600;
-
-export type LabelScanOutcome = {
-  fields: LabelOcrFields;
-  status: import("@/lib/labelOcrCloud").LabelOcrCloudStatus;
-  message: string;
-};
-
-/** Fast cloud-only label read for Scan — no phone-side Tesseract (too slow on set). */
-export async function scanLabelFromCapture(
-  source: HTMLCanvasElement,
-  jpegDataUrl?: string
-): Promise<LabelScanOutcome> {
-  const canvas = autoCropLabelRegion(source);
-  const ocrCanvas = preprocessLabelContrast(scaleCanvas(canvas, SCAN_CLOUD_MAX_EDGE));
-  const cloudDataUrl = shrinkJpegForCloud(
-    ocrCanvas,
-    jpegDataUrl ?? ocrCanvas.toDataURL("image/jpeg", 0.88)
-  );
-  const { recognizeLabelFieldsCloudWithStatus, labelScanStatusMessage } = await import(
-    "@/lib/labelOcrCloud"
-  );
-  const outcome = await recognizeLabelFieldsCloudWithStatus(cloudDataUrl);
-  return {
-    ...outcome,
-    message: labelScanStatusMessage(outcome.status, outcome.fields),
-  };
-}
-
-/** Run OCR on a captured label photo; returns the three sticker lines separately. */
-export async function recognizeLabelFieldsFromImage(
-  source: HTMLCanvasElement | HTMLImageElement | string,
-  jpegDataUrl?: string
-): Promise<LabelOcrFields> {
-  let canvas: HTMLCanvasElement;
-  if (typeof source === "string") {
-    const img = await loadImage(source);
-    canvas = imageToCanvas(img);
-  } else if (source instanceof HTMLImageElement) {
-    canvas = imageToCanvas(source);
-  } else {
-    canvas = source;
-  }
-  const outcome = await scanLabelFromCapture(canvas, jpegDataUrl);
-  return outcome.fields;
-}
 
 /** Keep cloud OCR images under OCR.space free-tier size limit (~1 MB). */
-function shrinkJpegForCloud(canvas: HTMLCanvasElement, preferred?: string): string {
+export function shrinkJpegForCloud(canvas: HTMLCanvasElement, preferred?: string): string {
   const maxBase64 = 1_300_000;
   const tryUrls = preferred ? [preferred] : [];
   for (const q of [0.92, 0.85, 0.75, 0.65, 0.55]) {
@@ -1323,14 +1277,6 @@ export async function recognizeLabelFieldsLocalHeavy(canvas: HTMLCanvasElement):
   } finally {
     await worker.terminate();
   }
-}
-
-/** Run OCR on a captured label photo (canvas, image, or data URL). */
-export async function recognizeLabelFromImage(
-  source: HTMLCanvasElement | HTMLImageElement | string
-): Promise<string> {
-  const fields = await recognizeLabelFieldsFromImage(source);
-  return joinLabelFields(fields.job, fields.fabric, fields.size);
 }
 
 function scoreParsedLabelFields(fields: LabelOcrFields): number {
@@ -1455,23 +1401,4 @@ export function joinLabelFields(job: string, fabric: string, size: string): stri
     .map((part) => part.trim())
     .filter(Boolean)
     .join(" / ");
-}
-
-function loadImage(src: string): Promise<HTMLImageElement> {
-  return new Promise((resolve, reject) => {
-    const img = new Image();
-    img.onload = () => resolve(img);
-    img.onerror = () => reject(new Error("Could not load image."));
-    img.src = src;
-  });
-}
-
-function imageToCanvas(img: HTMLImageElement): HTMLCanvasElement {
-  const canvas = document.createElement("canvas");
-  canvas.width = img.naturalWidth || img.width;
-  canvas.height = img.naturalHeight || img.height;
-  const ctx = canvas.getContext("2d");
-  if (!ctx) throw new Error("Could not prepare image.");
-  ctx.drawImage(img, 0, 0);
-  return canvas;
 }
