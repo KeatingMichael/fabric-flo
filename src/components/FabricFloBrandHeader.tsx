@@ -1,7 +1,7 @@
 import { useState } from "react";
 import { Link, useLocation } from "react-router-dom";
 import { useActiveProduction } from "@/context/AppStore";
-import { useScrollContainer } from "@/context/ScrollContainerContext";
+import { scrollPageToTop } from "@/lib/scrollToTop";
 import logoBundled from "@/assets/fabric-flo-logo-widget.jpg";
 
 /** Public copy for dev + PWA; bundled copy for production builds. */
@@ -18,13 +18,12 @@ function formatProductionTitle(name: string): string {
 export function FabricFloBrandHeader() {
   const production = useActiveProduction();
   const { pathname } = useLocation();
-  const { scrollToTop } = useScrollContainer();
   const homeTo = production ? "/dashboard" : pathname === "/" ? "/" : "/app";
   const [logoSrc, setLogoSrc] = useState(logoBundled || LOGO_PUBLIC);
 
   function onHomeClick() {
     if (pathname === homeTo) {
-      scrollToTop();
+      scrollPageToTop();
     }
   }
 

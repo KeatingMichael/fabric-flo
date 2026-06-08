@@ -1,7 +1,6 @@
 import { useState } from "react";
-import { useLocation, useNavigate } from "react-router-dom";
+import { Link, useLocation, useNavigate } from "react-router-dom";
 import { ScanCameraPanel } from "@/components/ScanCameraPanel";
-import { ScrollLink } from "@/components/ScrollLink";
 import { isNativeApp } from "@/lib/native";
 import { hapticLight, hapticSuccess } from "@/lib/haptics";
 import { readScanNavState } from "@/lib/scanNavigation";
@@ -149,9 +148,9 @@ export function ScanPage() {
         </button>
       </section>
 
-      <ScrollLink to="/dashboard" className="btn btn-secondary btn-block">
+      <Link to="/dashboard" className="btn btn-secondary btn-block">
         Cancel
-      </ScrollLink>
+      </Link>
     </div>
   );
 }
