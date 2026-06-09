@@ -115,6 +115,11 @@ export function ScanCameraPanel({
 
     const hardCap = window.setTimeout(() => {
       if (scanGenRef.current !== scanGen) return;
+      onLabelScan?.({
+        fields: { job: "", fabric: "", size: "" },
+        status: "timeout",
+        message: "Slow connection — tap Scan again or fix fields below.",
+      });
       setBusy(false);
       setReadPhase(null);
       scanInFlightRef.current = false;
@@ -143,7 +148,6 @@ export function ScanCameraPanel({
       if (scanGenRef.current !== scanGen) return;
       const hasFields = Boolean(outcome.fields.job || outcome.fields.fabric || outcome.fields.size);
 
-      onLabelFields?.(outcome.fields);
       onLabelScan?.(outcome);
       onCameraError?.(null);
 

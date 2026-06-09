@@ -143,10 +143,14 @@ export function ScanPage() {
     setHint("Hold steady…");
   }
 
+  function onScanStart() {
+    setHint("Reading label…");
+  }
+
   function onLabelScan(outcome: LabelScanOutcome) {
     const hasFields = Boolean(outcome.fields.job || outcome.fields.fabric || outcome.fields.size);
 
-    if (!hasFields) {
+    if (!hasFields || outcome.status === "no_text") {
       setLabelJob("");
       setLabelFabric("");
       setLabelSize("");
@@ -349,13 +353,8 @@ export function ScanPage() {
       <ScanCameraPanel
         mode={mode}
         onQrDecoded={onQrDecoded}
-        onScanStart={clearLabelFields}
+        onScanStart={onScanStart}
         onFramingReady={onFramingReady}
-        onLabelFields={(fields) => {
-          setLabelJob(fields.job);
-          setLabelFabric(fields.fabric);
-          setLabelSize(fields.size);
-        }}
         onLabelScan={onLabelScan}
         onCameraError={setCameraError}
       />

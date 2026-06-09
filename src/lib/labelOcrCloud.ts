@@ -61,7 +61,7 @@ export type LabelScanOutcome = LabelOcrCloudOutcome & { message: string };
 
 export type ScanReadPhase = "native" | "cloud" | "phone";
 
-const CLOUD_OCR_TIMEOUT_MS = 22_000;
+const CLOUD_OCR_TIMEOUT_MS = 35_000;
 const PHONE_OCR_TIMEOUT_MS = 10_000;
 const SCAN_CLOUD_MAX_EDGE = 2400;
 const EMPTY_FIELDS: LabelOcrFields = { job: "", fabric: "", size: "" };

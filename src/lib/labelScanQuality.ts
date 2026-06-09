@@ -100,7 +100,7 @@ export function assessLabelFrameQuality(video: HTMLVideoElement): LabelFrameQual
   const labelPresent = paperFill > 0.12;
 
   const labelTooFar = labelPresent && paperFill < 0.16;
-  const labelTooClose = labelPresent && inkPixels > 120 && inkNearEdgeCount > inkPixels * 0.22;
+  const labelTooClose = labelPresent && inkPixels > 160 && inkNearEdgeCount > inkPixels * 0.38;
 
   let lapSum = 0;
   let lapCount = 0;

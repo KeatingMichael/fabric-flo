@@ -129,7 +129,7 @@ Deno.serve(async (req) => {
       geminiDetail = geminiBest.detail;
     }
 
-    if (structuredFields && scoreFields(structuredFields) >= 70 && isStrongFields(structuredFields)) {
+    if (structuredFields && scoreFields(structuredFields) >= 45) {
       const text = fieldsToText(structuredFields);
       return json({
         text,
@@ -227,66 +227,54 @@ async function runGeminiBest(
   images: string[],
   strips: string[]
 ): Promise<{ fields: LabelFields | null; provider: string; detail?: string }> {
-  const tasks: Promise<{ fields: LabelFields | null; provider: string; detail?: string }>[] = [];
+  const collected: LabelFields[] = [];
+  let provider = "gemini";
 
-  for (const img of images.slice(0, 4)) {
-    for (const model of GEMINI_MODELS) {
-      tasks.push(
-        runGeminiStructured(img, apiKey, "full", model).then((fields) => ({
-          fields,
-          provider: `gemini:${model}`,
-        }))
-      );
-      tasks.push(
-        runGeminiPlainText(img, apiKey, model).then((fields) => ({
-          fields,
-          provider: `gemini-text:${model}`,
-        }))
-      );
+  const tryReturn = (
+    fields: LabelFields | null,
+    tag: string
+  ): { fields: LabelFields; provider: string } | null => {
+    if (!fields || !hasAnyField(fields)) return null;
+    collected.push(fields);
+    const normalized = normalizeStructuredFields(fields);
+    if (scoreFields(normalized) >= 45) {
+      return { fields: normalized, provider: tag };
     }
+    return null;
+  };
+
+  const primary = images[0];
+  if (primary) {
+    for (const model of GEMINI_MODELS) {
+      const fields = await runGeminiStructured(primary, apiKey, "full", model);
+      const hit = tryReturn(fields, `gemini:${model}`);
+      if (hit) return hit;
+    }
+
+    const plain = await runGeminiPlainText(primary, apiKey, GEMINI_MODELS[0]!);
+    const plainHit = tryReturn(plain, `gemini-text:${GEMINI_MODELS[0]}`);
+    if (plainHit) return plainHit;
   }
 
   if (strips.length >= 3) {
-    tasks.push(
-      runGeminiStripMerge(strips.slice(0, 3), apiKey).then((fields) => ({
-        fields,
-        provider: "gemini-strips",
-      }))
-    );
+    const stripFields = await runGeminiStripMerge(strips.slice(0, 3), apiKey);
+    const stripHit = tryReturn(stripFields, "gemini-strips");
+    if (stripHit) return stripHit;
   }
 
-  const results = await Promise.all(tasks);
-  const merged = mergeBestGeminiFields(results.map((r) => r.fields).filter(Boolean) as LabelFields[]);
-  let provider = "gemini";
-  let detail: string | undefined;
+  for (const img of images.slice(1, 3)) {
+    const fields = await runGeminiStructured(img, apiKey, "full", GEMINI_MODELS[0]!);
+    const hit = tryReturn(fields, `gemini-alt:${GEMINI_MODELS[0]}`);
+    if (hit) return hit;
+  }
 
+  const merged = mergeBestGeminiFields(collected);
   if (merged && hasAnyField(merged)) {
-    let bestScore = scoreFields(merged);
-    for (const result of results) {
-      if (result.detail && !detail) detail = result.detail;
-      const s = scoreFields(result.fields);
-      if (s > bestScore) {
-        bestScore = s;
-        provider = result.provider;
-      }
-    }
-    return { fields: normalizeStructuredFields(merged), provider, detail };
+    provider = "gemini-merged";
+    return { fields: normalizeStructuredFields(merged), provider };
   }
 
-  let best: LabelFields | null = null;
-  let bestScore = 0;
-
-  for (const result of results) {
-    if (result.detail && !detail) detail = result.detail;
-    const s = scoreFields(result.fields);
-    if (s > bestScore) {
-      bestScore = s;
-      best = result.fields;
-      provider = result.provider;
-    }
-  }
-
-  return { fields: best ? normalizeStructuredFields(best) : null, provider, detail };
+  return { fields: null, provider };
 }
 
 function scoreJobField(job: string): number {
