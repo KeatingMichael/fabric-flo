@@ -10,8 +10,10 @@ import {
 import type { LabelOcrFields } from "@/lib/labelOcr";
 import {
   assessLabelFrameQualityThrottled,
-  AUTO_CAPTURE_QUALITY_THRESHOLD,
   AUTO_CAPTURE_STABLE_MS,
+  hintForLabelFrameQuality,
+  hintTextForLabelFrame,
+  type LabelFrameQuality,
 } from "@/lib/labelScanQuality";
 import { captureVideoFrame, decodeQrFromCanvas } from "@/lib/scanQrFromImage";
 
@@ -54,7 +56,7 @@ export function ScanCameraPanel({
   const [busy, setBusy] = useState(false);
   const [readPhase, setReadPhase] = useState<ScanReadPhase | null>(null);
   const [flash, setFlash] = useState(false);
-  const [frameQuality, setFrameQuality] = useState(0);
+  const [frameQuality, setFrameQuality] = useState<LabelFrameQuality | null>(null);
   const [autoReady, setAutoReady] = useState(false);
 
   useEffect(() => {
@@ -183,8 +185,8 @@ export function ScanCameraPanel({
 
       const quality = assessLabelFrameQualityThrottled(video);
       if (quality) {
-        setFrameQuality(Math.round(quality.score));
-        if (quality.score >= AUTO_CAPTURE_QUALITY_THRESHOLD) {
+        setFrameQuality(quality);
+        if (quality.readyToCapture) {
           if (!stableSinceRef.current) stableSinceRef.current = Date.now();
           const stableMs = Date.now() - stableSinceRef.current;
           if (stableMs >= AUTO_CAPTURE_STABLE_MS) {
@@ -215,14 +217,10 @@ export function ScanCameraPanel({
           : "Reading…";
 
   const qualityHint =
-    mode === "label" && ready && !busy
+    mode === "label" && ready && !busy && frameQuality
       ? autoReady
         ? "Capturing…"
-        : frameQuality >= AUTO_CAPTURE_QUALITY_THRESHOLD
-          ? "Hold steady…"
-          : frameQuality > 40
-            ? "Move closer to the label"
-            : "Center the white sticker in frame"
+        : hintTextForLabelFrame(hintForLabelFrameQuality(frameQuality))
       : null;
 
   return (

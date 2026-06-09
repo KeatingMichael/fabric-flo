@@ -7,15 +7,34 @@ export type LabelFrameQuality = {
   sharpness: number;
   brightEnough: boolean;
   labelPresent: boolean;
+  /** White/cream paper as a fraction of the viewfinder (0–1). */
+  paperFill: number;
+  /** Label occupies too little of the frame — move closer. */
+  labelTooFar: boolean;
+  /** Label fills or touches frame edges — back up to avoid clipping. */
+  labelTooClose: boolean;
+  /** Safe to auto-capture or tap Scan. */
+  readyToCapture: boolean;
 };
+
+export type LabelFrameHint =
+  | "center"
+  | "closer"
+  | "back_up"
+  | "hold_steady"
+  | "tap_scan";
 
 let sampleCanvas: HTMLCanvasElement | null = null;
 let lastSampleAt = 0;
 
-/** Laplacian variance + paper detection on viewfinder crop. */
+function isPaperPixel(r: number, g: number, b: number): boolean {
+  return r > 145 && g > 145 && b > 135 && r + g + b > 430;
+}
+
+/** Laplacian variance + paper bounds on viewfinder crop. */
 export function assessLabelFrameQuality(video: HTMLVideoElement): LabelFrameQuality {
   if (!video.videoWidth || !video.videoHeight) {
-    return { score: 0, sharpness: 0, brightEnough: false, labelPresent: false };
+    return emptyQuality();
   }
 
   if (!sampleCanvas) sampleCanvas = document.createElement("canvas");
@@ -26,9 +45,7 @@ export function assessLabelFrameQuality(video: HTMLVideoElement): LabelFrameQual
   canvas.height = sampleH;
 
   const ctx = canvas.getContext("2d", { willReadFrequently: true });
-  if (!ctx) {
-    return { score: 0, sharpness: 0, brightEnough: false, labelPresent: false };
-  }
+  if (!ctx) return emptyQuality();
 
   const guide = cropVideoFrameToGuide(video);
   ctx.drawImage(guide, 0, 0, sampleW, sampleH);
@@ -36,22 +53,50 @@ export function assessLabelFrameQuality(video: HTMLVideoElement): LabelFrameQual
 
   let lumSum = 0;
   let paperPixels = 0;
+  let minX = sampleW;
+  let minY = sampleH;
+  let maxX = 0;
+  let maxY = 0;
   const gray = new Float32Array(sampleW * sampleH);
 
-  for (let i = 0, p = 0; i < data.length; i += 4, p++) {
-    const r = data[i]!;
-    const g = data[i + 1]!;
-    const b = data[i + 2]!;
-    const l = 0.299 * r + 0.587 * g + 0.114 * b;
-    gray[p] = l;
-    lumSum += l;
-    if (r > 145 && g > 145 && b > 135 && r + g + b > 430) paperPixels++;
+  for (let y = 0; y < sampleH; y++) {
+    for (let x = 0; x < sampleW; x++) {
+      const i = (y * sampleW + x) * 4;
+      const r = data[i]!;
+      const g = data[i + 1]!;
+      const b = data[i + 2]!;
+      const l = 0.299 * r + 0.587 * g + 0.114 * b;
+      const p = y * sampleW + x;
+      gray[p] = l;
+      lumSum += l;
+      if (!isPaperPixel(r, g, b)) continue;
+      paperPixels++;
+      minX = Math.min(minX, x);
+      maxX = Math.max(maxX, x);
+      minY = Math.min(minY, y);
+      maxY = Math.max(maxY, y);
+    }
   }
 
   const n = gray.length;
   const mean = lumSum / n;
-  const brightEnough = mean >= 95 && mean <= 230;
-  const labelPresent = paperPixels / n > 0.18;
+  const brightEnough = mean >= 90 && mean <= 235;
+  const paperFill = paperPixels / n;
+  const labelPresent = paperFill > 0.12;
+
+  const hasBounds = paperPixels > 40 && maxX > minX && maxY > minY;
+  const edgeMarginX = sampleW * 0.06;
+  const edgeMarginY = sampleH * 0.06;
+  const touchesEdge =
+    hasBounds &&
+    (minX <= edgeMarginX ||
+      maxX >= sampleW - edgeMarginX ||
+      minY <= edgeMarginY ||
+      maxY >= sampleH - edgeMarginY);
+  const fillsFrame = paperFill > 0.72;
+
+  const labelTooFar = labelPresent && paperFill < 0.2;
+  const labelTooClose = labelPresent && (touchesEdge || fillsFrame);
 
   let lapSum = 0;
   let lapCount = 0;
@@ -71,12 +116,71 @@ export function assessLabelFrameQuality(video: HTMLVideoElement): LabelFrameQual
   }
 
   const sharpness = lapCount ? lapSum / lapCount : 0;
-  let score = 0;
-  if (brightEnough) score += 30;
-  if (labelPresent) score += 35;
-  score += Math.min(35, sharpness * 1.8);
+  const sharpEnough = sharpness >= 6;
 
-  return { score, sharpness, brightEnough, labelPresent };
+  let score = 0;
+  if (brightEnough) score += 28;
+  if (labelPresent) score += 22;
+  if (paperFill >= 0.22 && paperFill <= 0.68) score += 28;
+  else if (paperFill > 0.68 && !labelTooClose) score += 18;
+  score += Math.min(22, sharpness * 1.4);
+  if (labelTooFar) score -= 25;
+  if (labelTooClose) score -= 30;
+
+  const readyToCapture =
+    labelPresent &&
+    brightEnough &&
+    sharpEnough &&
+    !labelTooFar &&
+    !labelTooClose &&
+    paperFill >= 0.18;
+
+  return {
+    score,
+    sharpness,
+    brightEnough,
+    labelPresent,
+    paperFill,
+    labelTooFar,
+    labelTooClose,
+    readyToCapture,
+  };
+}
+
+function emptyQuality(): LabelFrameQuality {
+  return {
+    score: 0,
+    sharpness: 0,
+    brightEnough: false,
+    labelPresent: false,
+    paperFill: 0,
+    labelTooFar: false,
+    labelTooClose: false,
+    readyToCapture: false,
+  };
+}
+
+export function hintForLabelFrameQuality(q: LabelFrameQuality): LabelFrameHint {
+  if (!q.labelPresent) return "center";
+  if (q.labelTooClose) return "back_up";
+  if (q.labelTooFar) return "closer";
+  if (q.readyToCapture) return "hold_steady";
+  return "tap_scan";
+}
+
+export function hintTextForLabelFrame(hint: LabelFrameHint): string {
+  switch (hint) {
+    case "center":
+      return "Center the white sticker in frame";
+    case "closer":
+      return "Move closer to the label";
+    case "back_up":
+      return "Back up slightly — keep all three lines in frame";
+    case "hold_steady":
+      return "Hold steady…";
+    case "tap_scan":
+      return "Tap Scan when all three lines are visible";
+  }
 }
 
 /** Throttle quality checks to ~5 Hz. */
@@ -87,5 +191,4 @@ export function assessLabelFrameQualityThrottled(video: HTMLVideoElement): Label
   return assessLabelFrameQuality(video);
 }
 
-export const AUTO_CAPTURE_QUALITY_THRESHOLD = 68;
 export const AUTO_CAPTURE_STABLE_MS = 320;
