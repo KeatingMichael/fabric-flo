@@ -79,7 +79,8 @@ Deno.serve(async (req) => {
     }
 
     const visionKey = Deno.env.get("GOOGLE_VISION_API_KEY")?.trim();
-    const geminiKey = Deno.env.get("GEMINI_API_KEY")?.trim();
+    const geminiKey =
+      Deno.env.get("GEMINI_API_KEY")?.trim() || Deno.env.get("GOOGLE_VISION_API_KEY")?.trim();
     const ocrSpaceKey = Deno.env.get("OCR_SPACE_API_KEY")?.trim();
     if (!visionKey && !ocrSpaceKey && !geminiKey) {
       return json({ text: "", error: "vision_not_configured" });
@@ -149,6 +150,17 @@ Deno.serve(async (req) => {
       });
     }
 
+    if (structuredFields && scoreFields(structuredFields) >= 35) {
+      const text = fieldsToText(structuredFields);
+      return json({
+        text,
+        rawText: text,
+        fields: structuredFields,
+        provider: structuredProvider,
+        candidates: [{ text, provider: structuredProvider }],
+      });
+    }
+
     // Fallback: parallel text OCR for client-side parsing
     const { best, candidates } = await runAllProviders(
       images,
@@ -177,7 +189,7 @@ Deno.serve(async (req) => {
       text: "",
       rawText: "",
       error: "no_text_detected",
-      detail: best.detail ?? "ocr_miss",
+      detail: best.detail ?? (geminiKey ? "ocr_miss" : "gemini_not_configured"),
       candidates: [],
     });
   } catch (e) {
@@ -324,9 +336,21 @@ async function runAllProviders(
     if (visionKey) {
       tasks.push(runGoogleVision(img, visionKey).then((r) => ({ ...r, provider: "google" })));
     }
+    if (geminiKey) {
+      tasks.push(
+        runGeminiStructured(img, geminiKey, "full").then((fields) => ({
+          text: fields ? fieldsToText(fields) : null,
+          fields,
+          provider: "gemini",
+        }))
+      );
+    }
     if (ocrSpaceKey && img.length <= 1_350_000) {
       tasks.push(
         runOcrSpaceEngine(ocrSpaceKey, img, "2").then((text) => ({ text, provider: "ocrspace" }))
+      );
+      tasks.push(
+        runOcrSpaceEngine(ocrSpaceKey, img, "1").then((text) => ({ text, provider: "ocrspace" }))
       );
     }
   }
@@ -349,8 +373,11 @@ async function runAllProviders(
   let best: OcrAttempt = { text: null, detail: "ocr_miss" };
 
   for (const result of results) {
-    if (result.detail && !result.text && best.detail === "ocr_miss") {
+    if (result.detail && !result.text && !result.fields && best.detail === "ocr_miss") {
       best.detail = result.detail;
+    }
+    if (result.fields && scoreFields(result.fields) > scoreFields(best.fields ?? null)) {
+      best = result;
     }
     if (!result.text) continue;
 
@@ -406,7 +433,10 @@ async function runGoogleVision(imageBase64: string, apiKey: string): Promise<Ocr
         requests: [
           {
             image: { content: imageBase64 },
-            features: [{ type: "DOCUMENT_TEXT_DETECTION", maxResults: 1 }],
+            features: [
+              { type: "DOCUMENT_TEXT_DETECTION", maxResults: 1 },
+              { type: "TEXT_DETECTION", maxResults: 1 },
+            ],
             imageContext: { languageHints: ["en"] },
           },
         ],

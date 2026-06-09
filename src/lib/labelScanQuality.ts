@@ -28,7 +28,11 @@ let sampleCanvas: HTMLCanvasElement | null = null;
 let lastSampleAt = 0;
 
 function isPaperPixel(r: number, g: number, b: number): boolean {
-  return r > 145 && g > 145 && b > 135 && r + g + b > 430;
+  return r > 118 && g > 118 && b > 108 && r + g + b > 360;
+}
+
+function isInkPixel(l: number): boolean {
+  return l < 95;
 }
 
 /** Laplacian variance + paper bounds on viewfinder crop. */
@@ -53,11 +57,15 @@ export function assessLabelFrameQuality(video: HTMLVideoElement): LabelFrameQual
 
   let lumSum = 0;
   let paperPixels = 0;
+  let inkPixels = 0;
+  let inkNearEdge = false;
   let minX = sampleW;
   let minY = sampleH;
   let maxX = 0;
   let maxY = 0;
   const gray = new Float32Array(sampleW * sampleH);
+  const edgeMarginX = sampleW * 0.05;
+  const edgeMarginY = sampleH * 0.05;
 
   for (let y = 0; y < sampleH; y++) {
     for (let x = 0; x < sampleW; x++) {
@@ -69,12 +77,19 @@ export function assessLabelFrameQuality(video: HTMLVideoElement): LabelFrameQual
       const p = y * sampleW + x;
       gray[p] = l;
       lumSum += l;
-      if (!isPaperPixel(r, g, b)) continue;
-      paperPixels++;
-      minX = Math.min(minX, x);
-      maxX = Math.max(maxX, x);
-      minY = Math.min(minY, y);
-      maxY = Math.max(maxY, y);
+      if (isPaperPixel(r, g, b)) {
+        paperPixels++;
+        minX = Math.min(minX, x);
+        maxX = Math.max(maxX, x);
+        minY = Math.min(minY, y);
+        maxY = Math.max(maxY, y);
+      }
+      if (isInkPixel(l)) {
+        inkPixels++;
+        if (x <= edgeMarginX || x >= sampleW - edgeMarginX || y <= edgeMarginY || y >= sampleH - edgeMarginY) {
+          inkNearEdge = true;
+        }
+      }
     }
   }
 
@@ -84,19 +99,8 @@ export function assessLabelFrameQuality(video: HTMLVideoElement): LabelFrameQual
   const paperFill = paperPixels / n;
   const labelPresent = paperFill > 0.12;
 
-  const hasBounds = paperPixels > 40 && maxX > minX && maxY > minY;
-  const edgeMarginX = sampleW * 0.06;
-  const edgeMarginY = sampleH * 0.06;
-  const touchesEdge =
-    hasBounds &&
-    (minX <= edgeMarginX ||
-      maxX >= sampleW - edgeMarginX ||
-      minY <= edgeMarginY ||
-      maxY >= sampleH - edgeMarginY);
-  const fillsFrame = paperFill > 0.72;
-
-  const labelTooFar = labelPresent && paperFill < 0.2;
-  const labelTooClose = labelPresent && (touchesEdge || fillsFrame);
+  const labelTooFar = labelPresent && paperFill < 0.16;
+  const labelTooClose = labelPresent && inkPixels > 80 && inkNearEdge;
 
   let lapSum = 0;
   let lapCount = 0;
@@ -121,8 +125,8 @@ export function assessLabelFrameQuality(video: HTMLVideoElement): LabelFrameQual
   let score = 0;
   if (brightEnough) score += 28;
   if (labelPresent) score += 22;
-  if (paperFill >= 0.22 && paperFill <= 0.68) score += 28;
-  else if (paperFill > 0.68 && !labelTooClose) score += 18;
+  if (paperFill >= 0.22 && paperFill <= 0.75) score += 28;
+  else if (paperFill >= 0.16) score += 18;
   score += Math.min(22, sharpness * 1.4);
   if (labelTooFar) score -= 25;
   if (labelTooClose) score -= 30;

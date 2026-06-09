@@ -1,9 +1,9 @@
 /** Label image prep for cloud scan — no tesseract (keeps Scan off the heavy OCR chunk). */
 
-const GUIDE_INSET_TOP = 0.08;
-const GUIDE_INSET_BOTTOM = 0.08;
-const GUIDE_INSET_LEFT = 0.08;
-const GUIDE_INSET_RIGHT = 0.08;
+const GUIDE_INSET_TOP = 0.04;
+const GUIDE_INSET_BOTTOM = 0.04;
+const GUIDE_INSET_LEFT = 0.04;
+const GUIDE_INSET_RIGHT = 0.04;
 
 /** Crop camera frame to the on-screen viewfinder guide (accounts for object-fit: cover). */
 export function cropVideoFrameToGuide(video: HTMLVideoElement): HTMLCanvasElement {
@@ -115,7 +115,7 @@ export function cropToWhiteLabel(source: HTMLCanvasElement): HTMLCanvasElement {
     const r = data[i]!;
     const g = data[i + 1]!;
     const b = data[i + 2]!;
-    return r > 145 && g > 145 && b > 135 && r + g + b > 430;
+    return r > 118 && g > 118 && b > 108 && r + g + b > 360;
   };
 
   let minX = width;
@@ -155,6 +155,11 @@ export function cropToWhiteLabel(source: HTMLCanvasElement): HTMLCanvasElement {
 /** White-label crop scaled to target size (no tone filter). */
 export function scaleWhiteLabel(source: HTMLCanvasElement, targetLongEdge: number): HTMLCanvasElement {
   return scaleCanvas(cropToWhiteLabel(source), targetLongEdge);
+}
+
+/** Raw viewfinder crop scaled for OCR — no white-label or contrast filters. */
+export function prepareRawGuideForOcr(source: HTMLCanvasElement, targetLongEdge: number): HTMLCanvasElement {
+  return scaleCanvas(source, targetLongEdge);
 }
 
 /** Guide crop → white label crop → contrast → scale for cloud OCR. */
@@ -341,7 +346,8 @@ export function preprocessLabelCanvas(source: HTMLCanvasElement): HTMLCanvasElem
 }
 
 function applyTonePipeline(source: HTMLCanvasElement, tone: ToneAdjust): HTMLCanvasElement {
-  const scaled = scaleCanvas(source, 4000);
+  const longEdge = Math.max(source.width, source.height);
+  const scaled = longEdge > 2800 ? scaleCanvas(source, 2800) : source;
   const canvas = cloneCanvas(scaled);
   const ctx = canvas.getContext("2d");
   if (!ctx) return scaled;

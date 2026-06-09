@@ -1,6 +1,8 @@
 import {
   prepareLabelScanCanvas,
   prepareLabelScanVariants,
+  prepareRawGuideForOcr,
+  scaleCanvas,
   shrinkJpegForCloud,
 } from "@/lib/labelOcrImage";
 import {
@@ -139,8 +141,12 @@ function outcomeFromPayload(payload: LabelOcrResponse | null): LabelOcrCloudOutc
     return { fields: EMPTY_FIELDS, status: "error", detail: payload.detail };
   }
   const fields = fieldsFromPayload(payload);
-  if (payload.error === "no_text_detected" || !hasAnyLabelField(fields)) {
-    return { fields: EMPTY_FIELDS, status: "no_text", detail: payload.detail };
+  if (!hasAnyLabelField(fields)) {
+    return {
+      fields: EMPTY_FIELDS,
+      status: "no_text",
+      detail: payload.detail ?? payload.error,
+    };
   }
   return {
     fields,
@@ -155,12 +161,13 @@ function toBase64(canvas: HTMLCanvasElement): string {
 }
 
 function prepareCloudRequest(source: HTMLCanvasElement): LabelOcrRequest {
+  const raw = prepareRawGuideForOcr(source, SCAN_CLOUD_MAX_EDGE);
   const { natural, binarized, rotated } = prepareLabelScanVariants(source, SCAN_CLOUD_MAX_EDGE);
   return {
-    imageBase64: toBase64(natural),
-    altImageBase64: toBase64(binarized),
-    extraImagesBase64: [toBase64(rotated)],
-    stripsBase64: stripBase64Payload(natural),
+    imageBase64: toBase64(raw),
+    altImageBase64: toBase64(natural),
+    extraImagesBase64: [toBase64(binarized), toBase64(rotated)],
+    stripsBase64: stripBase64Payload(scaleCanvas(source, SCAN_CLOUD_MAX_EDGE)),
   };
 }
 
@@ -209,23 +216,29 @@ export async function scanLabelFromCapture(
     };
   }
 
-  const cloudWeak =
-    !hasAnyLabelField(outcome.fields) ||
-    outcome.status === "partial" ||
-    outcome.status === "timeout" ||
-    outcome.status === "error";
-
-  if (cloudWeak) {
-    onPhase?.("phone");
-    const phoneCanvas = prepareLabelScanCanvas(source, 2200);
-    const phoneFields = await withTimeout(readLabelOnPhone(phoneCanvas), PHONE_OCR_TIMEOUT_MS, EMPTY_FIELDS);
-    if (hasAnyLabelField(phoneFields)) {
-      const merged = pickBetterFields(outcome.fields, phoneFields);
+  onPhase?.("phone");
+  const phoneRaw = scaleCanvas(source, 2200);
+  const phoneFields = await withTimeout(readLabelOnPhone(phoneRaw), PHONE_OCR_TIMEOUT_MS, EMPTY_FIELDS);
+  if (hasAnyLabelField(phoneFields)) {
+    const merged = pickBetterFields(outcome.fields, phoneFields);
+    outcome = {
+      fields: merged,
+      status: scoreFields(merged),
+      detail: outcome.detail,
+      provider: outcome.provider ?? "phone-tesseract",
+    };
+  } else if (!hasAnyLabelField(outcome.fields)) {
+    const phonePrepped = await withTimeout(
+      readLabelOnPhone(prepareLabelScanCanvas(source, 2200)),
+      PHONE_OCR_TIMEOUT_MS,
+      EMPTY_FIELDS
+    );
+    if (hasAnyLabelField(phonePrepped)) {
       outcome = {
-        fields: merged,
-        status: scoreFields(merged),
+        fields: phonePrepped,
+        status: scoreFields(phonePrepped),
         detail: outcome.detail,
-        provider: outcome.provider ?? "phone-tesseract",
+        provider: "phone-tesseract",
       };
     }
   }
@@ -329,6 +342,9 @@ export function labelScanStatusMessage(status: LabelOcrCloudStatus, detail?: str
     case "error":
       return "Couldn’t read — tap Scan again or fix fields below.";
     case "no_text":
+      if (detail === "gemini_not_configured") {
+        return "Add GEMINI_API_KEY in Supabase for handwriting, or type the three lines below.";
+      }
       if (detail === "google_billing") {
         return "Enable Google Cloud billing for Vision, or type the three lines below.";
       }
