@@ -15,6 +15,10 @@ const root = join(dirname(fileURLToPath(import.meta.url)), "..");
 
 const guides = [
   {
+    md: join(root, "docs", "COMPLETE_ROADMAP.md"),
+    out: join(root, "docs", "Fabric_Flo_Complete_Roadmap.pdf"),
+  },
+  {
     md: join(root, "docs", "START_HERE.md"),
     out: join(root, "docs", "Fabric_Flo_START_HERE.pdf"),
   },

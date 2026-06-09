@@ -86,9 +86,10 @@ project from GitHub and builds the iPhone + Android apps in the cloud.
 
 Read the PDFs **in this order**, one at a time, and stop when you're done for the day:
 
-1. `Fabric_Flo_Transfer_To_Windows.pdf` *(only if you're switching to the Windows PC)*
-2. `Fabric_Flo_Finish_And_Submit_Checklist.pdf` *(your master to-do)*
-3. `Fabric_Flo_Codemagic_Setup.pdf` *(the keys to paste for cloud builds)*
+1. **`Fabric_Flo_Complete_Roadmap.pdf`** *(master path: Mac → Windows → both stores)*
+2. `Fabric_Flo_Transfer_To_Windows.pdf` *(extra Windows clone detail)*
+3. `Fabric_Flo_Finish_And_Submit_Checklist.pdf` *(store submission tick-list)*
+4. `Fabric_Flo_Codemagic_Setup.pdf` *(keys to paste for cloud builds)*
 
 You do **not** need to understand the code. You only need to follow the steps and paste the values
 the sheets ask for.
