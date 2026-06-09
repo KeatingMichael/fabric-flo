@@ -1,9 +1,7 @@
+import { Capacitor } from "@capacitor/core";
 import {
-  prepareLabelScanCanvas,
-  prepareLabelScanVariants,
   prepareRawGuideForOcr,
   scaleCanvas,
-  shrinkJpegForCloud,
 } from "@/lib/labelOcrImage";
 import {
   looksLikeWeakFabricLine,
@@ -61,9 +59,9 @@ export type LabelScanOutcome = LabelOcrCloudOutcome & { message: string };
 
 export type ScanReadPhase = "native" | "cloud" | "phone";
 
-const CLOUD_OCR_TIMEOUT_MS = 35_000;
-const PHONE_OCR_TIMEOUT_MS = 10_000;
-const SCAN_CLOUD_MAX_EDGE = 2400;
+const CLOUD_OCR_TIMEOUT_MS = 14_000;
+const PHONE_OCR_TIMEOUT_MS = 5_000;
+const SCAN_CLOUD_MAX_EDGE = 1800;
 const EMPTY_FIELDS: LabelOcrFields = { job: "", fabric: "", size: "" };
 
 function withTimeout<T>(promise: Promise<T>, ms: number, fallback: T): Promise<T> {
@@ -170,23 +168,23 @@ function outcomeFromPayload(payload: LabelOcrResponse | null): LabelOcrCloudOutc
 }
 
 function toBase64(canvas: HTMLCanvasElement): string {
-  return shrinkJpegForCloud(canvas).replace(/^data:image\/\w+;base64,/, "");
+  return canvas.toDataURL("image/jpeg", 0.82).replace(/^data:image\/\w+;base64,/, "");
 }
 
 function prepareCloudRequest(source: HTMLCanvasElement): LabelOcrRequest {
   const raw = prepareRawGuideForOcr(source, SCAN_CLOUD_MAX_EDGE);
-  const { natural, binarized, rotated } = prepareLabelScanVariants(source, SCAN_CLOUD_MAX_EDGE);
   return {
     imageBase64: toBase64(raw),
-    altImageBase64: toBase64(natural),
-    extraImagesBase64: [toBase64(binarized), toBase64(rotated)],
-    stripsBase64: stripBase64Payload(scaleCanvas(source, SCAN_CLOUD_MAX_EDGE)),
+    stripsBase64: stripBase64Payload(raw),
   };
 }
 
 function shouldSkipPhoneFallback(outcome: LabelOcrCloudOutcome): boolean {
-  if (!outcome.provider?.includes("gemini")) return false;
-  return scoreParsedLabelFields(outcome.fields) >= 40;
+  // Phone Tesseract adds 5–15s and is weak on marker handwriting — rely on Gemini/cloud.
+  if (hasAnyLabelField(outcome.fields)) return true;
+  if (outcome.status === "timeout" || outcome.status === "error") return true;
+  if (outcome.provider?.includes("gemini") || outcome.detail === "ocr_miss") return true;
+  return scoreParsedLabelFields(outcome.fields) >= 20;
 }
 
 function mergeIfBetter(current: LabelOcrFields, next: LabelOcrFields): LabelOcrFields {
@@ -218,7 +216,9 @@ export async function scanLabelFromCapture(
   const jpegBase64 = source.toDataURL("image/jpeg", 0.9).replace(/^data:image\/\w+;base64,/, "");
 
   onPhase?.("native");
-  const nativeFields = await recognizeLabelOnDevice(jpegBase64);
+  const nativeFields = Capacitor.isNativePlatform()
+    ? await recognizeLabelOnDevice(jpegBase64)
+    : null;
   if (nativeFields && scoreFields(nativeFields) === "success") {
     return {
       ...outcomeFromFields(nativeFields, "native-vision"),
@@ -239,7 +239,7 @@ export async function scanLabelFromCapture(
 
   if (!shouldSkipPhoneFallback(outcome)) {
     onPhase?.("phone");
-    const phoneRaw = scaleCanvas(source, 2200);
+    const phoneRaw = scaleCanvas(source, 1600);
     const phoneFields = await withTimeout(readLabelOnPhone(phoneRaw), PHONE_OCR_TIMEOUT_MS, EMPTY_FIELDS);
     if (hasAnyLabelField(phoneFields)) {
       const merged = mergeIfBetter(outcome.fields, sanitizeLabelFields(phoneFields));
@@ -249,20 +249,6 @@ export async function scanLabelFromCapture(
         detail: outcome.detail,
         provider: outcome.provider ?? "phone-tesseract",
       };
-    } else if (!hasAnyLabelField(outcome.fields)) {
-      const phonePrepped = await withTimeout(
-        readLabelOnPhone(prepareLabelScanCanvas(source, 2200)),
-        PHONE_OCR_TIMEOUT_MS,
-        EMPTY_FIELDS
-      );
-      if (hasAnyLabelField(phonePrepped)) {
-        outcome = {
-          fields: sanitizeLabelFields(phonePrepped),
-          status: scoreFields(sanitizeLabelFields(phonePrepped)),
-          detail: outcome.detail,
-          provider: "phone-tesseract",
-        };
-      }
     }
   }
 
