@@ -38,7 +38,7 @@ workflows:
     environment:
       <<: *env_versions
       groups:
-        - *vite_build_group
+        - fabricflo_web
       ios_signing:
         distribution_type: app_store
         bundle_identifier: app.fabricflo.tracker
@@ -84,8 +84,8 @@ workflows:
     environment:
       <<: *env_versions
       groups:
-        - *vite_build_group
-        - fabricflo_android   # keystore vars below
+        - fabricflo_web
+        - fabricflo_android
       android_signing:
         # Upload your keystore in Codemagic ▸ App settings ▸ Code signing identities,
         # then reference its reference name here.
