@@ -1,5 +1,4 @@
 import {
-  autoCropLabelRegion,
   scaleCanvas,
   shrinkJpegForCloud,
 } from "@/lib/labelOcrImage";
@@ -8,6 +7,7 @@ import {
   looksLikeWeakJobLine,
   looksLikeWeakSizeLine,
   parseRawTextToLabelFields,
+  splitLabelIntoFields,
   type LabelOcrFields,
 } from "@/lib/labelOcr";
 import {
@@ -20,6 +20,8 @@ type LabelOcrResponse = {
   text?: string;
   error?: string;
   rawText?: string;
+  provider?: string;
+  detail?: string;
 };
 
 type LabelOcrRequest = {
@@ -39,13 +41,14 @@ export type LabelOcrCloudStatus =
 export type LabelOcrCloudOutcome = {
   fields: LabelOcrFields;
   status: LabelOcrCloudStatus;
+  detail?: string;
 };
 
 export type LabelScanOutcome = LabelOcrCloudOutcome & { message: string };
 
 export type ScanReadPhase = "cloud" | "phone";
 
-const CLOUD_OCR_TIMEOUT_MS = 6_000;
+const CLOUD_OCR_TIMEOUT_MS = 15_000;
 const SCAN_CLOUD_MAX_EDGE = 1800;
 const EMPTY_FIELDS: LabelOcrFields = { job: "", fabric: "", size: "" };
 
@@ -98,7 +101,11 @@ function fieldsFromPayload(payload: LabelOcrResponse | null): LabelOcrFields {
   if (!payload) return EMPTY_FIELDS;
   const raw = payload.text?.trim() || payload.rawText?.trim() || "";
   if (!raw) return EMPTY_FIELDS;
-  return parseRawTextToLabelFields(raw);
+  const parsed = parseRawTextToLabelFields(raw);
+  if (hasAnyLabelField(parsed)) return parsed;
+  const split = splitLabelIntoFields(raw.replace(/\n/g, " / "));
+  if (hasAnyLabelField(split)) return split;
+  return parsed;
 }
 
 function outcomeFromPayload(payload: LabelOcrResponse | null): LabelOcrCloudOutcome {
@@ -106,21 +113,21 @@ function outcomeFromPayload(payload: LabelOcrResponse | null): LabelOcrCloudOutc
     return { fields: EMPTY_FIELDS, status: "error" };
   }
   if (payload.error === "vision_not_configured") {
-    return { fields: EMPTY_FIELDS, status: "error" };
+    return { fields: EMPTY_FIELDS, status: "error", detail: payload.detail };
   }
   const fields = fieldsFromPayload(payload);
   if (payload.error === "no_text_detected" || !hasAnyLabelField(fields)) {
-    return { fields: EMPTY_FIELDS, status: "no_text" };
+    return { fields: EMPTY_FIELDS, status: "no_text", detail: payload.detail };
   }
-  return { fields, status: scoreFields(fields) };
+  return { fields, status: scoreFields(fields), detail: payload.detail };
 }
 
 function prepareCloudRequest(
   source: HTMLCanvasElement,
   _jpegDataUrl?: string
 ): LabelOcrRequest {
-  const cropped = autoCropLabelRegion(source);
-  const scaled = scaleCanvas(cropped, SCAN_CLOUD_MAX_EDGE);
+  // Guide crop only — autoCrop was often trimming handwritten lines on set photos.
+  const scaled = scaleCanvas(source, SCAN_CLOUD_MAX_EDGE);
   const stripsBase64 = stripBase64Payload(scaled);
   const imageBase64 = shrinkJpegForCloud(scaled).replace(/^data:image\/\w+;base64,/, "");
   return { imageBase64, stripsBase64 };
@@ -139,7 +146,7 @@ export async function scanLabelFromCapture(
 
   return {
     ...outcome,
-    message: labelScanStatusMessage(outcome.status),
+    message: labelScanStatusMessage(outcome.status, outcome.detail),
   };
 }
 
@@ -213,7 +220,10 @@ async function recognizeLabelFieldsCloudInner(request: LabelOcrRequest): Promise
   }
 }
 
-export function labelScanStatusMessage(status: LabelOcrCloudStatus): string {
+export function labelScanStatusMessage(status: LabelOcrCloudStatus, detail?: string): string {
+  if (detail === "google_billing") {
+    return "Google Vision billing is not enabled — check Google Cloud billing, then Scan again.";
+  }
   switch (status) {
     case "offline":
       return "Offline — type or fix the fields below.";

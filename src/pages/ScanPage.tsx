@@ -137,15 +137,27 @@ export function ScanPage() {
   }
 
   function onLabelScan(outcome: LabelScanOutcome) {
+    const hasFields = Boolean(outcome.fields.job || outcome.fields.fabric || outcome.fields.size);
+
+    if (!hasFields) {
+      setLabelJob("");
+      setLabelFabric("");
+      setLabelSize("");
+      setHint(outcome.message);
+      return;
+    }
+
     setLabelJob(outcome.fields.job);
     setLabelFabric(outcome.fields.fabric);
     setLabelSize(outcome.fields.size);
-    const hasFields = Boolean(outcome.fields.job || outcome.fields.fabric || outcome.fields.size);
-    if (hasFields && production && production.locations.length === 0) {
+
+    if (production && production.locations.length === 0) {
       setHint("Label read — add a place above, then Add to Log.");
       window.setTimeout(() => quickLocNameRef.current?.focus(), 120);
-    } else {
+    } else if (outcome.status === "partial") {
       setHint(outcome.message);
+    } else {
+      setHint("Label read — pick a place and Add to Log.");
     }
 
     if (looksLikeWeakJobLine(outcome.fields.job)) focusFieldAfterScan.current = "job";

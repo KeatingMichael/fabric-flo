@@ -78,12 +78,15 @@ Deno.serve(async (req) => {
     }
 
     const strips = body.stripsBase64?.filter((s) => s && s.length > 32) ?? [];
+    let ocrDetail: string | undefined;
 
     if (visionKey) {
-      const googleText = await runGoogleVisionPrimary(visionKey, imageBase64, strips);
-      if (googleText) {
-        return json({ text: googleText, rawText: googleText, provider: "google" });
+      const google = await runGoogleVisionPrimary(visionKey, imageBase64, strips);
+      if (google.text) {
+        return json({ text: google.text, rawText: google.text, provider: "google" });
       }
+      ocrDetail = google.detail;
+      if (ocrDetail) console.warn("Google Vision failed:", ocrDetail);
     }
 
     if (ocrSpaceKey) {
@@ -93,29 +96,35 @@ Deno.serve(async (req) => {
       }
     }
 
-    return json({ text: "", rawText: "", error: "no_text_detected" });
+    return json({ text: "", rawText: "", error: "no_text_detected", detail: ocrDetail ?? "ocr_miss" });
   } catch (e) {
     return json({ text: "", error: e instanceof Error ? e.message : "unknown" }, 500);
   }
 });
 
-/** One full-image call, then one batched strip call if lines are sparse. */
+/** Strips first (one Vision batch), then full frame, then OCR.space. */
 async function runGoogleVisionPrimary(
   apiKey: string,
   imageBase64: string,
   stripsBase64: string[]
-): Promise<string | null> {
-  const fullText = await runGoogleVisionBatch(apiKey, [imageBase64]);
-  if (fullText && countUsefulLines(fullText) >= 2) return fullText;
-
+): Promise<{ text: string | null; detail?: string }> {
   if (stripsBase64.length >= 3) {
-    const stripText = await runGoogleVisionBatch(apiKey, stripsBase64.slice(0, 3));
-    if (stripText) {
-      return mergeOcrTexts([fullText ?? "", stripText]);
+    const stripResult = await runGoogleVisionBatch(apiKey, stripsBase64.slice(0, 3));
+    if (stripResult.detail && !stripResult.text) return { text: null, detail: stripResult.detail };
+    const stripText = stripResult.text;
+    if (stripText && countUsefulLines(stripText) >= 2) {
+      return { text: stripText };
+    }
+    if (stripText && countUsefulLines(stripText) >= 1) {
+      const fullResult = await runGoogleVisionBatch(apiKey, [imageBase64]);
+      if (fullResult.detail && !fullResult.text) return { text: stripText, detail: fullResult.detail };
+      if (fullResult.text) return { text: mergeOcrTexts([stripText, fullResult.text]) };
+      return { text: stripText };
     }
   }
 
-  return fullText;
+  const fullResult = await runGoogleVisionBatch(apiKey, [imageBase64]);
+  return { text: fullResult.text, detail: fullResult.detail };
 }
 
 function countUsefulLines(text: string): number {
@@ -125,8 +134,11 @@ function countUsefulLines(text: string): number {
     .filter((line) => line.length >= 2).length;
 }
 
-async function runGoogleVisionBatch(apiKey: string, imagesBase64: string[]): Promise<string | null> {
-  if (!imagesBase64.length) return null;
+async function runGoogleVisionBatch(
+  apiKey: string,
+  imagesBase64: string[]
+): Promise<{ text: string | null; detail?: string }> {
+  if (!imagesBase64.length) return { text: null };
 
   const visionRes = await fetch(
     `https://vision.googleapis.com/v1/images:annotate?key=${apiKey}`,
@@ -145,8 +157,10 @@ async function runGoogleVisionBatch(apiKey: string, imagesBase64: string[]): Pro
 
   if (!visionRes.ok) {
     const errBody = await visionRes.text();
-    console.warn("Google Vision HTTP", visionRes.status, errBody.slice(0, 240));
-    return null;
+    console.warn("Google Vision HTTP", visionRes.status, errBody.slice(0, 320));
+    const detail =
+      visionRes.status === 403 || /billing|PERMISSION_DENIED/i.test(errBody) ? "google_billing" : undefined;
+    return { text: null, detail };
   }
 
   const vision = (await visionRes.json()) as VisionResponse;
@@ -161,8 +175,8 @@ async function runGoogleVisionBatch(apiKey: string, imagesBase64: string[]): Pro
     if (text) chunks.push(text);
   }
 
-  if (!chunks.length) return null;
-  return mergeOcrTexts(chunks);
+  if (!chunks.length) return { text: null };
+  return { text: mergeOcrTexts(chunks) };
 }
 
 async function runOcrSpaceCombined(

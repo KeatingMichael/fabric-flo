@@ -12,7 +12,7 @@ import { captureVideoFrame, decodeQrFromCanvas } from "@/lib/scanQrFromImage";
 
 type ScanMode = "qr" | "label";
 
-const SCAN_HARD_CAP_MS = 7_000;
+const SCAN_HARD_CAP_MS = 16_000;
 const LABEL_FOCUS_MS = 150;
 
 type Props = {
@@ -93,10 +93,8 @@ export function ScanCameraPanel({
     setReadPhase(null);
     const hardCap = window.setTimeout(() => {
       if (scanGenRef.current !== scanGen) return;
-      scanGenRef.current += 1;
       setBusy(false);
       setReadPhase(null);
-      onCameraError?.("Scan took too long — tap Scan to try again.");
     }, SCAN_HARD_CAP_MS);
 
     try {
