@@ -10,6 +10,7 @@ import {
 import type { LabelOcrFields } from "@/lib/labelOcr";
 import {
   assessLabelFrameQualityThrottled,
+  AUTO_CAPTURE_FAIL_COOLDOWN_MS,
   AUTO_CAPTURE_STABLE_MS,
   hintForLabelFrameQuality,
   hintTextForLabelFrame,
@@ -29,7 +30,6 @@ type Props = {
   onLabelScan?: (outcome: LabelScanOutcome) => void;
   onCameraError?: (message: string | null) => void;
   onScanStart?: () => void;
-  onFramingReady?: () => void;
   autoCapture?: boolean;
 };
 
@@ -47,13 +47,13 @@ export function ScanCameraPanel({
   onLabelScan,
   onCameraError,
   onScanStart,
-  onFramingReady,
-  autoCapture = true,
+  autoCapture = false,
 }: Props) {
   const videoRef = useRef<HTMLVideoElement>(null);
   const scanGenRef = useRef(0);
   const stableSinceRef = useRef<number | null>(null);
   const scanInFlightRef = useRef(false);
+  const autoCapturePausedUntilRef = useRef(0);
   const [ready, setReady] = useState(false);
   const [busy, setBusy] = useState(false);
   const [readPhase, setReadPhase] = useState<ScanReadPhase | null>(null);
@@ -148,6 +148,12 @@ export function ScanCameraPanel({
       if (scanGenRef.current !== scanGen) return;
       const hasFields = Boolean(outcome.fields.job || outcome.fields.fabric || outcome.fields.size);
 
+      if (!hasFields || outcome.status === "no_text") {
+        autoCapturePausedUntilRef.current = Date.now() + AUTO_CAPTURE_FAIL_COOLDOWN_MS;
+      } else {
+        autoCapturePausedUntilRef.current = Date.now() + 2500;
+      }
+
       onLabelScan?.(outcome);
       onCameraError?.(null);
 
@@ -189,14 +195,16 @@ export function ScanCameraPanel({
         return;
       }
 
+      if (Date.now() < autoCapturePausedUntilRef.current) {
+        raf = window.requestAnimationFrame(tick);
+        return;
+      }
+
       const quality = assessLabelFrameQualityThrottled(video);
       if (quality) {
         setFrameQuality(quality);
         if (quality.readyToCapture) {
-          if (!stableSinceRef.current) {
-            stableSinceRef.current = Date.now();
-            onFramingReady?.();
-          }
+          if (!stableSinceRef.current) stableSinceRef.current = Date.now();
           const stableMs = Date.now() - stableSinceRef.current;
           if (stableMs >= AUTO_CAPTURE_STABLE_MS) {
             setAutoReady(true);
@@ -214,7 +222,7 @@ export function ScanCameraPanel({
 
     raf = window.requestAnimationFrame(tick);
     return () => window.cancelAnimationFrame(raf);
-  }, [autoCapture, busy, mode, onFramingReady, ready, runScan]);
+  }, [autoCapture, busy, mode, ready, runScan]);
 
   const readingLabel =
     readPhase === "native"
@@ -229,7 +237,7 @@ export function ScanCameraPanel({
     mode === "label" && ready && !busy && frameQuality
       ? autoReady
         ? "Capturing…"
-        : hintTextForLabelFrame(hintForLabelFrameQuality(frameQuality))
+        : hintTextForLabelFrame(hintForLabelFrameQuality(frameQuality, autoCapture))
       : null;
 
   return (

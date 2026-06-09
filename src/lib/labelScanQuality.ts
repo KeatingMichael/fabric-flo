@@ -31,10 +31,6 @@ function isPaperPixel(r: number, g: number, b: number): boolean {
   return r > 118 && g > 118 && b > 108 && r + g + b > 360;
 }
 
-function isInkPixel(l: number): boolean {
-  return l < 95;
-}
-
 /** Laplacian variance + paper bounds on viewfinder crop. */
 export function assessLabelFrameQuality(video: HTMLVideoElement): LabelFrameQuality {
   if (!video.videoWidth || !video.videoHeight) {
@@ -57,16 +53,11 @@ export function assessLabelFrameQuality(video: HTMLVideoElement): LabelFrameQual
 
   let lumSum = 0;
   let paperPixels = 0;
-  let inkPixels = 0;
-  let inkNearEdgeCount = 0;
   let minX = sampleW;
   let minY = sampleH;
   let maxX = 0;
   let maxY = 0;
   const gray = new Float32Array(sampleW * sampleH);
-  const edgeMarginX = sampleW * 0.05;
-  const edgeMarginY = sampleH * 0.05;
-
   for (let y = 0; y < sampleH; y++) {
     for (let x = 0; x < sampleW; x++) {
       const i = (y * sampleW + x) * 4;
@@ -84,12 +75,6 @@ export function assessLabelFrameQuality(video: HTMLVideoElement): LabelFrameQual
         minY = Math.min(minY, y);
         maxY = Math.max(maxY, y);
       }
-      if (isInkPixel(l)) {
-        inkPixels++;
-        if (x <= edgeMarginX || x >= sampleW - edgeMarginX || y <= edgeMarginY || y >= sampleH - edgeMarginY) {
-          inkNearEdgeCount++;
-        }
-      }
     }
   }
 
@@ -100,7 +85,10 @@ export function assessLabelFrameQuality(video: HTMLVideoElement): LabelFrameQual
   const labelPresent = paperFill > 0.12;
 
   const labelTooFar = labelPresent && paperFill < 0.16;
-  const labelTooClose = labelPresent && inkPixels > 160 && inkNearEdgeCount > inkPixels * 0.38;
+  const paperW = maxX > minX ? (maxX - minX) / sampleW : 0;
+  const paperH = maxY > minY ? (maxY - minY) / sampleH : 0;
+  // Warn only when the paper itself fills the crop — bold ink always touches edges on 3-line labels.
+  const labelTooClose = labelPresent && (paperW > 0.94 || paperH > 0.92);
 
   let lapSum = 0;
   let lapCount = 0;
@@ -120,7 +108,7 @@ export function assessLabelFrameQuality(video: HTMLVideoElement): LabelFrameQual
   }
 
   const sharpness = lapCount ? lapSum / lapCount : 0;
-  const sharpEnough = sharpness >= 6;
+  const sharpEnough = sharpness >= 4;
 
   let score = 0;
   if (brightEnough) score += 28;
@@ -164,11 +152,14 @@ function emptyQuality(): LabelFrameQuality {
   };
 }
 
-export function hintForLabelFrameQuality(q: LabelFrameQuality): LabelFrameHint {
+export function hintForLabelFrameQuality(
+  q: LabelFrameQuality,
+  autoCapture = false
+): LabelFrameHint {
   if (!q.labelPresent) return "center";
   if (q.labelTooClose) return "back_up";
   if (q.labelTooFar) return "closer";
-  if (q.readyToCapture) return "hold_steady";
+  if (q.readyToCapture) return autoCapture ? "hold_steady" : "tap_scan";
   return "tap_scan";
 }
 
@@ -195,4 +186,6 @@ export function assessLabelFrameQualityThrottled(video: HTMLVideoElement): Label
   return assessLabelFrameQuality(video);
 }
 
-export const AUTO_CAPTURE_STABLE_MS = 320;
+export const AUTO_CAPTURE_STABLE_MS = 550;
+/** Pause auto-capture after a failed read so the UI does not loop. */
+export const AUTO_CAPTURE_FAIL_COOLDOWN_MS = 12_000;

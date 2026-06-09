@@ -137,12 +137,6 @@ export function ScanPage() {
     setHint(null);
   }
 
-  function onFramingReady() {
-    if (!labelJob.trim() && !labelFabric.trim() && !labelSize.trim()) return;
-    clearLabelFields();
-    setHint("Hold steady…");
-  }
-
   function onScanStart() {
     setHint("Reading label…");
   }
@@ -354,7 +348,7 @@ export function ScanPage() {
         mode={mode}
         onQrDecoded={onQrDecoded}
         onScanStart={onScanStart}
-        onFramingReady={onFramingReady}
+        autoCapture={false}
         onLabelScan={onLabelScan}
         onCameraError={setCameraError}
       />
