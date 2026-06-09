@@ -129,7 +129,7 @@ Deno.serve(async (req) => {
       geminiDetail = geminiBest.detail;
     }
 
-    if (structuredFields && scoreFields(structuredFields) >= 25) {
+    if (structuredFields && scoreFields(structuredFields) >= 70 && isStrongFields(structuredFields)) {
       const text = fieldsToText(structuredFields);
       return json({
         text,
@@ -256,10 +256,25 @@ async function runGeminiBest(
   }
 
   const results = await Promise.all(tasks);
-  let best: LabelFields | null = null;
-  let bestScore = 0;
+  const merged = mergeBestGeminiFields(results.map((r) => r.fields).filter(Boolean) as LabelFields[]);
   let provider = "gemini";
   let detail: string | undefined;
+
+  if (merged && hasAnyField(merged)) {
+    let bestScore = scoreFields(merged);
+    for (const result of results) {
+      if (result.detail && !detail) detail = result.detail;
+      const s = scoreFields(result.fields);
+      if (s > bestScore) {
+        bestScore = s;
+        provider = result.provider;
+      }
+    }
+    return { fields: normalizeStructuredFields(merged), provider, detail };
+  }
+
+  let best: LabelFields | null = null;
+  let bestScore = 0;
 
   for (const result of results) {
     if (result.detail && !detail) detail = result.detail;
@@ -271,7 +286,70 @@ async function runGeminiBest(
     }
   }
 
-  return { fields: best, provider, detail };
+  return { fields: best ? normalizeStructuredFields(best) : null, provider, detail };
+}
+
+function scoreJobField(job: string): number {
+  const digits = job.replace(/\D/g, "");
+  if (digits.length < 5 || digits.length > 7) return digits.length >= 4 ? 15 : 0;
+  return 40 + digits.length;
+}
+
+function scoreFabricField(fabric: string): number {
+  const trimmed = fabric.trim().toUpperCase();
+  const compact = trimmed.replace(/[^A-Z]/g, "");
+  if (compact.length < 3) return 0;
+  if (/^SO?L+I?D$|^SLD$|^SOUD$|^S0LID$|^5OLID$/i.test(compact)) return 95;
+  if (trimmed.includes("BLUE") && trimmed.includes("FOAM")) return 95;
+  if (trimmed.includes(" ")) return 80 + trimmed.length;
+  if (/^(MUSLIN|DUVET|DUVETYNE|VELVET|CHROMA|BOUNCE|SCRIM|NET|SATIN|SILK|GRID|FOAM)$/i.test(compact)) {
+    return 85;
+  }
+  if (compact.length <= 4) return 20;
+  return 50;
+}
+
+function scoreSizeField(size: string): number {
+  if (!/\d+\s*['′]?\s*[xX×]\s*\d+/i.test(size)) return 0;
+  const matched = size.match(/(\d+)\s*['′]?\s*[xX×]\s*(\d+)/i);
+  if (!matched) return 30;
+  const a = Number(matched[1]);
+  const b = Number(matched[2]);
+  let score = 50;
+  if (a >= 8 || b >= 8) score += 25;
+  if (matched[1] !== matched[2]) score += 10;
+  return score;
+}
+
+function mergeBestGeminiFields(candidates: LabelFields[]): LabelFields | null {
+  let job = "";
+  let fabric = "";
+  let size = "";
+  let jobScore = 0;
+  let fabricScore = 0;
+  let sizeScore = 0;
+
+  for (const fields of candidates) {
+    if (!fields) continue;
+    const normalized = normalizeStructuredFields(fields);
+    const js = scoreJobField(normalized.job);
+    const fs = scoreFabricField(normalized.fabric);
+    const ss = scoreSizeField(normalized.size);
+    if (js > jobScore && normalized.job) {
+      jobScore = js;
+      job = normalized.job;
+    }
+    if (fs > fabricScore && normalized.fabric) {
+      fabricScore = fs;
+      fabric = normalized.fabric;
+    }
+    if (ss > sizeScore && normalized.size) {
+      sizeScore = ss;
+      size = normalized.size;
+    }
+  }
+
+  return hasAnyField({ job, fabric, size }) ? { job, fabric, size } : null;
 }
 
 function scoreFields(fields: LabelFields | null): number {
@@ -292,9 +370,21 @@ function fieldsToText(fields: LabelFields): string {
 function normalizeStructuredFields(raw: LabelFields): LabelFields {
   return {
     job: raw.job.replace(/[Oo]/g, "0").replace(/[Il|]/g, "1").replace(/\D/g, "").slice(0, 8),
-    fabric: raw.fabric.trim().toUpperCase().replace(/\s+/g, " "),
+    fabric: repairFabric(raw.fabric),
     size: raw.size.trim().replace(/[×]/g, "x"),
   };
+}
+
+function repairFabric(fabric: string): string {
+  const upper = fabric.trim().toUpperCase().replace(/\s+/g, " ");
+  if (!upper) return "";
+  const compact = upper.replace(/[^A-Z]/g, "");
+  if (/^SO?L+I?D$|^SLD$|^SOUD$|^S0LID$|^SL1D$|^5OLID$|^SOLO$|^OB$|^OOB$/i.test(compact)) {
+    return "SOLID";
+  }
+  if (compact.includes("BLUE") && compact.includes("FOAM")) return "BLUE FOAM";
+  if (upper.includes("BLUE") && upper.includes("FOAM")) return "BLUE FOAM";
+  return upper;
 }
 
 function parseGeminiJson(text: string): LabelFields | null {
@@ -319,7 +409,7 @@ async function runGeminiStructured(
 ): Promise<LabelFields | null> {
   const prompts: Record<typeof mode, string> = {
     full:
-      "Read the white rental fabric label with 3 lines: job number (digits), fabric name, size. Return JSON only.",
+      "Read the white rental fabric label with exactly 3 handwritten lines: (1) job number digits like 111023 or 236998, (2) fabric name like SOLID or BLUE FOAM, (3) size like 12' x 12' or 40' x 60'. Return JSON only.",
     job: "This image is ONLY the top line of a rental label — the job number. Return JSON with job (digits only), fabric empty string, size empty string.",
     fabric:
       "This image is ONLY the middle line of a rental label — the fabric name. Return JSON with job empty, fabric name uppercase, size empty.",

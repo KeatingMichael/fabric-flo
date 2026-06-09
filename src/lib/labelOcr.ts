@@ -327,7 +327,10 @@ function repairFabricLine(line: string): string {
   if (normalized.includes(" ") && normalized.length >= 5) return normalized;
   const compact = normalized.replace(/[^A-Z]/g, "");
   if (SOLID_ALIASES.has(compact)) return "SOLID";
-  if (/^O+L+$|^SO?L+$|^SOU?D$|^S0LID$|^SLD$|^SLID$|^SOLO$|^OB$|^OOB$/i.test(compact)) return "SOLID";
+  if (/^O+L+$|^SO?L+$|^SOU?D$|^S0LID$|^SLD$|^SLID$|^SL1D$|^5OLID$|^SOLO$|^OB$|^OOB$/i.test(compact)) {
+    return "SOLID";
+  }
+  if (/^S[O0]?L[I1]?D$/i.test(compact)) return "SOLID";
   const keyword = extractFabricKeyword(normalized);
   if (keyword && levenshtein(compact, keyword) <= 1) return keyword;
   return normalized;
@@ -634,7 +637,10 @@ function scoreFabricCandidate(text: string): number {
     if (levenshtein(compact, kw) <= 1) return 65;
     if (levenshtein(compact, kw) === 2) return 45;
   }
-  return scoreReadableLine(text);
+  const readable = scoreReadableLine(text);
+  // Short unknown tokens (OHD, ADR) are usually OCR noise, not fabric names.
+  if (compact.length <= 4 && !normalized.includes(" ")) return Math.min(readable, 45);
+  return readable;
 }
 
 function scoreJobDigits(digits: string): number {

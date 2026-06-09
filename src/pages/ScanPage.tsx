@@ -137,6 +137,12 @@ export function ScanPage() {
     setHint(null);
   }
 
+  function onFramingReady() {
+    if (!labelJob.trim() && !labelFabric.trim() && !labelSize.trim()) return;
+    clearLabelFields();
+    setHint("Hold steady…");
+  }
+
   function onLabelScan(outcome: LabelScanOutcome) {
     const hasFields = Boolean(outcome.fields.job || outcome.fields.fabric || outcome.fields.size);
 
@@ -156,15 +162,21 @@ export function ScanPage() {
       const validated = validateLabelFieldsAgainstInventory(production, fields);
       fields = validated.fields;
       if (validated.corrected) {
-        status = looksLikeWeakJobLine(fields.job) ||
-          looksLikeWeakFabricLine(fields.fabric) ||
-          looksLikeWeakSizeLine(fields.size)
-          ? "partial"
-          : "success";
         message = validated.hint ?? outcome.message;
       } else if (validated.hint) {
         message = validated.hint;
       }
+    }
+
+    const weakAfter =
+      looksLikeWeakJobLine(fields.job) ||
+      looksLikeWeakFabricLine(fields.fabric) ||
+      looksLikeWeakSizeLine(fields.size);
+    status = weakAfter ? "partial" : "success";
+    if (weakAfter && !message.includes("inventory") && !message.includes("Matched")) {
+      message = "Got some lines — fix any field below, then Add to Log.";
+    } else if (!weakAfter && status === "success" && !message.includes("inventory")) {
+      message = "Label read — pick a place and Add to Log.";
     }
 
     setLabelJob(fields.job);
@@ -338,6 +350,7 @@ export function ScanPage() {
         mode={mode}
         onQrDecoded={onQrDecoded}
         onScanStart={clearLabelFields}
+        onFramingReady={onFramingReady}
         onLabelFields={(fields) => {
           setLabelJob(fields.job);
           setLabelFabric(fields.fabric);

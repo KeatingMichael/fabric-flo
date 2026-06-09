@@ -81,7 +81,9 @@ function scoreFields(fields: LabelOcrFields): LabelOcrCloudStatus {
     looksLikeWeakJobLine(fields.job) ||
     looksLikeWeakFabricLine(fields.fabric) ||
     looksLikeWeakSizeLine(fields.size);
-  return weak ? "partial" : "success";
+  if (weak) return "partial";
+  if (scoreParsedLabelFields(fields) < 75) return "partial";
+  return "success";
 }
 
 function isInvokeTransportError(error: unknown): boolean {

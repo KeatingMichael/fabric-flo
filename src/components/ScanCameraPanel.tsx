@@ -29,6 +29,7 @@ type Props = {
   onLabelScan?: (outcome: LabelScanOutcome) => void;
   onCameraError?: (message: string | null) => void;
   onScanStart?: () => void;
+  onFramingReady?: () => void;
   autoCapture?: boolean;
 };
 
@@ -46,6 +47,7 @@ export function ScanCameraPanel({
   onLabelScan,
   onCameraError,
   onScanStart,
+  onFramingReady,
   autoCapture = true,
 }: Props) {
   const videoRef = useRef<HTMLVideoElement>(null);
@@ -187,7 +189,10 @@ export function ScanCameraPanel({
       if (quality) {
         setFrameQuality(quality);
         if (quality.readyToCapture) {
-          if (!stableSinceRef.current) stableSinceRef.current = Date.now();
+          if (!stableSinceRef.current) {
+            stableSinceRef.current = Date.now();
+            onFramingReady?.();
+          }
           const stableMs = Date.now() - stableSinceRef.current;
           if (stableMs >= AUTO_CAPTURE_STABLE_MS) {
             setAutoReady(true);
@@ -205,7 +210,7 @@ export function ScanCameraPanel({
 
     raf = window.requestAnimationFrame(tick);
     return () => window.cancelAnimationFrame(raf);
-  }, [autoCapture, busy, mode, ready, runScan]);
+  }, [autoCapture, busy, mode, onFramingReady, ready, runScan]);
 
   const readingLabel =
     readPhase === "native"
