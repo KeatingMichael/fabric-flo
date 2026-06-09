@@ -1,5 +1,5 @@
 import {
-  scaleCanvas,
+  prepareLabelScanCanvas,
   shrinkJpegForCloud,
 } from "@/lib/labelOcrImage";
 import {
@@ -12,6 +12,7 @@ import {
 } from "@/lib/labelOcr";
 import {
   hasAnyLabelField,
+  readLabelBlockFast,
   stripBase64Payload,
 } from "@/lib/labelOcrQuick";
 import { FunctionsHttpError, getSupabase } from "@/lib/supabase";
@@ -48,8 +49,9 @@ export type LabelScanOutcome = LabelOcrCloudOutcome & { message: string };
 
 export type ScanReadPhase = "cloud" | "phone";
 
-const CLOUD_OCR_TIMEOUT_MS = 15_000;
-const SCAN_CLOUD_MAX_EDGE = 1800;
+const CLOUD_OCR_TIMEOUT_MS = 18_000;
+const PHONE_OCR_TIMEOUT_MS = 12_000;
+const SCAN_CLOUD_MAX_EDGE = 2000;
 const EMPTY_FIELDS: LabelOcrFields = { job: "", fabric: "", size: "" };
 
 function withTimeout<T>(promise: Promise<T>, ms: number, fallback: T): Promise<T> {
@@ -126,14 +128,13 @@ function prepareCloudRequest(
   source: HTMLCanvasElement,
   _jpegDataUrl?: string
 ): LabelOcrRequest {
-  // Guide crop only — autoCrop was often trimming handwritten lines on set photos.
-  const scaled = scaleCanvas(source, SCAN_CLOUD_MAX_EDGE);
+  const scaled = prepareLabelScanCanvas(source, SCAN_CLOUD_MAX_EDGE);
   const stripsBase64 = stripBase64Payload(scaled);
   const imageBase64 = shrinkJpegForCloud(scaled).replace(/^data:image\/\w+;base64,/, "");
   return { imageBase64, stripsBase64 };
 }
 
-/** Fast cloud-only label read — target ~5s end-to-end. */
+/** Cloud OCR with on-phone block read fallback when cloud misses. */
 export async function scanLabelFromCapture(
   source: HTMLCanvasElement,
   jpegDataUrl?: string,
@@ -142,7 +143,19 @@ export async function scanLabelFromCapture(
   const request = prepareCloudRequest(source, jpegDataUrl);
 
   onPhase?.("cloud");
-  const outcome = await recognizeLabelFieldsCloudWithStatus(request);
+  let outcome = await recognizeLabelFieldsCloudWithStatus(request);
+
+  if (!hasAnyLabelField(outcome.fields)) {
+    onPhase?.("phone");
+    const phoneFields = await withTimeout(
+      readLabelBlockFast(prepareLabelScanCanvas(source, 2200)),
+      PHONE_OCR_TIMEOUT_MS,
+      EMPTY_FIELDS
+    );
+    if (hasAnyLabelField(phoneFields)) {
+      outcome = { fields: phoneFields, status: scoreFields(phoneFields), detail: outcome.detail };
+    }
+  }
 
   return {
     ...outcome,
@@ -222,7 +235,10 @@ async function recognizeLabelFieldsCloudInner(request: LabelOcrRequest): Promise
 
 export function labelScanStatusMessage(status: LabelOcrCloudStatus, detail?: string): string {
   if (detail === "google_billing") {
-    return "Google Vision billing is not enabled — check Google Cloud billing, then Scan again.";
+    return "Enable Google Cloud billing for Vision, or tap the fields below to type.";
+  }
+  if (detail === "google_api_disabled") {
+    return "Enable Cloud Vision API in Google Cloud, then Scan again.";
   }
   switch (status) {
     case "offline":

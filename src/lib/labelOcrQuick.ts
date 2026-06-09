@@ -88,6 +88,11 @@ export async function blockLabelRead(source: HTMLCanvasElement): Promise<LabelOc
   }
 }
 
+export async function readLabelBlockFast(source: HTMLCanvasElement): Promise<LabelOcrFields> {
+  const block = await blockLabelRead(source);
+  return block ?? EMPTY;
+}
+
 export async function readLabelOnPhone(source: HTMLCanvasElement): Promise<LabelOcrFields> {
   const stripFields = await threeLineLabelRead(source);
   if (stripFields.job && stripFields.fabric && stripFields.size) return stripFields;

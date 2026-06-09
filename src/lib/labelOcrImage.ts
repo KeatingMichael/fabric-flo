@@ -1,9 +1,9 @@
 /** Label image prep for cloud scan — no tesseract (keeps Scan off the heavy OCR chunk). */
 
-const GUIDE_INSET_TOP = 0.12;
-const GUIDE_INSET_BOTTOM = 0.12;
-const GUIDE_INSET_LEFT = 0.1;
-const GUIDE_INSET_RIGHT = 0.1;
+const GUIDE_INSET_TOP = 0.08;
+const GUIDE_INSET_BOTTOM = 0.08;
+const GUIDE_INSET_LEFT = 0.08;
+const GUIDE_INSET_RIGHT = 0.08;
 
 /** Crop camera frame to the on-screen viewfinder guide (accounts for object-fit: cover). */
 export function cropVideoFrameToGuide(video: HTMLVideoElement): HTMLCanvasElement {
@@ -102,6 +102,60 @@ export function autoCropLabelRegion(source: HTMLCanvasElement): HTMLCanvasElemen
   out.height = h;
   out.getContext("2d")!.drawImage(source, x, y, w, h, 0, 0, w, h);
   return out;
+}
+
+/** Crop to the white/cream paper label — skips rug and table around it. */
+export function cropToWhiteLabel(source: HTMLCanvasElement): HTMLCanvasElement {
+  const ctx = source.getContext("2d");
+  if (!ctx) return source;
+  const { data, width, height } = ctx.getImageData(0, 0, source.width, source.height);
+
+  const isPaper = (x: number, y: number) => {
+    const i = (y * width + x) * 4;
+    const r = data[i]!;
+    const g = data[i + 1]!;
+    const b = data[i + 2]!;
+    return r > 158 && g > 158 && b > 148 && r + g + b > 480;
+  };
+
+  let minX = width;
+  let minY = height;
+  let maxX = 0;
+  let maxY = 0;
+  let paperPixels = 0;
+  const step = Math.max(1, Math.floor(Math.min(width, height) / 400));
+
+  for (let y = 0; y < height; y += step) {
+    for (let x = 0; x < width; x += step) {
+      if (!isPaper(x, y)) continue;
+      paperPixels++;
+      minX = Math.min(minX, x);
+      maxX = Math.max(maxX, x);
+      minY = Math.min(minY, y);
+      maxY = Math.max(maxY, y);
+    }
+  }
+
+  if (paperPixels < 80 || maxX - minX < 48 || maxY - minY < 48) return source;
+
+  const padX = Math.round((maxX - minX) * 0.04);
+  const padY = Math.round((maxY - minY) * 0.05);
+  const x = Math.max(0, minX - padX);
+  const y = Math.max(0, minY - padY);
+  const w = Math.min(width - x, maxX - minX + padX * 2);
+  const h = Math.min(height - y, maxY - minY + padY * 2);
+
+  const out = document.createElement("canvas");
+  out.width = w;
+  out.height = h;
+  out.getContext("2d")!.drawImage(source, x, y, w, h, 0, 0, w, h);
+  return out;
+}
+
+/** Guide crop → white label crop → scale for cloud OCR. */
+export function prepareLabelScanCanvas(source: HTMLCanvasElement, targetLongEdge: number): HTMLCanvasElement {
+  const label = cropToWhiteLabel(source);
+  return scaleCanvas(label, targetLongEdge);
 }
 
 function cloneCanvas(source: HTMLCanvasElement): HTMLCanvasElement {

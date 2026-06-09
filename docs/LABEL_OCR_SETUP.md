@@ -11,14 +11,12 @@ under 1,000 scans/month.
 
 ### What you do (one-time, ~10 minutes)
 
-1. Open [Google Cloud Console](https://console.cloud.google.com/).
-2. Create a project (or pick an existing one).
-3. **APIs & Services → Library** → search **Cloud Vision API** → **Enable**.
-4. **APIs & Services → Billing** → link a billing account (required for Vision; free tier still
-   applies).
-5. **APIs & Services → Credentials → Create credentials → API key**.
-6. Click the new key → **Restrict key** → **Cloud Vision API** only → Save.
-7. Copy the API key.
+1. Open [Google Cloud Console](https://console.cloud.google.com/) → project **FABRIC FLO**.
+2. **APIs & Services → Library** → enable **Cloud Vision API**.
+3. **Also enable Generative Language API** (powers Gemini Flash fallback on messy handwriting).
+4. **APIs & Services → Billing** → link a billing account (required; first 1,000 Vision scans/month free).
+5. **Credentials → Create credentials → API key** → restrict to **Cloud Vision API** + **Generative Language API**.
+6. Copy the key.
 
 ### Add the key to Supabase
 

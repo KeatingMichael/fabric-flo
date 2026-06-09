@@ -3,14 +3,12 @@
  *
  * Deploy: supabase functions deploy label-ocr --project-ref YOUR_PROJECT_REF
  *
- * Recommended (fast + accurate):
- *   supabase secrets set GOOGLE_VISION_API_KEY=your_key
+ * Secrets (set any combination):
+ *   GOOGLE_VISION_API_KEY  — Cloud Vision (enable billing + Vision API)
+ *   GEMINI_API_KEY         — Gemini Flash fallback (enable Generative Language API)
+ *   OCR_SPACE_API_KEY      — free OCR.space fallback
  *
- * Free fallback (slower):
- *   supabase secrets set OCR_SPACE_API_KEY=your_key
- *
- * If both are set, Google Vision runs first; OCR.space is fallback.
- * Requires Authorization: Bearer <user JWT>.
+ * Uses GOOGLE_VISION_API_KEY for Gemini when GEMINI_API_KEY is not set.
  */
 import { createClient } from "https://esm.sh/@supabase/supabase-js@2.49.1";
 
@@ -22,8 +20,13 @@ const cors = {
 type VisionResponse = {
   responses?: Array<{
     fullTextAnnotation?: { text?: string };
-    textAnnotations?: Array<{ description?: string }>;
     error?: { message?: string };
+  }>;
+};
+
+type GeminiResponse = {
+  candidates?: Array<{
+    content?: { parts?: Array<{ text?: string }> };
   }>;
 };
 
@@ -38,6 +41,12 @@ type LabelOcrBody = {
   stripsBase64?: string[];
 };
 
+type OcrAttempt = {
+  text: string | null;
+  provider?: string;
+  detail?: string;
+};
+
 Deno.serve(async (req) => {
   if (req.method === "OPTIONS") {
     return new Response("ok", { headers: cors });
@@ -50,8 +59,9 @@ Deno.serve(async (req) => {
     }
 
     const visionKey = Deno.env.get("GOOGLE_VISION_API_KEY")?.trim();
+    const geminiKey = (Deno.env.get("GEMINI_API_KEY") ?? visionKey)?.trim();
     const ocrSpaceKey = Deno.env.get("OCR_SPACE_API_KEY")?.trim();
-    if (!visionKey && !ocrSpaceKey) {
+    if (!visionKey && !ocrSpaceKey && !geminiKey) {
       return json({ text: "", error: "vision_not_configured" });
     }
 
@@ -77,143 +87,163 @@ Deno.serve(async (req) => {
       return json({ error: "image_too_large" }, 413);
     }
 
-    const strips = body.stripsBase64?.filter((s) => s && s.length > 32) ?? [];
-    let ocrDetail: string | undefined;
-
-    if (visionKey) {
-      const google = await runGoogleVisionPrimary(visionKey, imageBase64, strips);
-      if (google.text) {
-        return json({ text: google.text, rawText: google.text, provider: "google" });
-      }
-      ocrDetail = google.detail;
-      if (ocrDetail) console.warn("Google Vision failed:", ocrDetail);
+    const best = await runAllProviders(imageBase64, visionKey, geminiKey, ocrSpaceKey);
+    if (best.text) {
+      return json({
+        text: best.text,
+        rawText: best.text,
+        provider: best.provider ?? "unknown",
+      });
     }
 
-    if (ocrSpaceKey) {
-      const ocrSpaceText = await runOcrSpaceCombined(ocrSpaceKey, imageBase64, strips);
-      if (ocrSpaceText) {
-        return json({ text: ocrSpaceText, rawText: ocrSpaceText, provider: "ocrspace" });
-      }
-    }
-
-    return json({ text: "", rawText: "", error: "no_text_detected", detail: ocrDetail ?? "ocr_miss" });
+    return json({
+      text: "",
+      rawText: "",
+      error: "no_text_detected",
+      detail: best.detail ?? "ocr_miss",
+    });
   } catch (e) {
     return json({ text: "", error: e instanceof Error ? e.message : "unknown" }, 500);
   }
 });
 
-/** Strips first (one Vision batch), then full frame, then OCR.space. */
-async function runGoogleVisionPrimary(
-  apiKey: string,
+async function runAllProviders(
   imageBase64: string,
-  stripsBase64: string[]
-): Promise<{ text: string | null; detail?: string }> {
-  if (stripsBase64.length >= 3) {
-    const stripResult = await runGoogleVisionBatch(apiKey, stripsBase64.slice(0, 3));
-    if (stripResult.detail && !stripResult.text) return { text: null, detail: stripResult.detail };
-    const stripText = stripResult.text;
-    if (stripText && countUsefulLines(stripText) >= 2) {
-      return { text: stripText };
-    }
-    if (stripText && countUsefulLines(stripText) >= 1) {
-      const fullResult = await runGoogleVisionBatch(apiKey, [imageBase64]);
-      if (fullResult.detail && !fullResult.text) return { text: stripText, detail: fullResult.detail };
-      if (fullResult.text) return { text: mergeOcrTexts([stripText, fullResult.text]) };
-      return { text: stripText };
-    }
+  visionKey?: string,
+  geminiKey?: string,
+  ocrSpaceKey?: string
+): Promise<OcrAttempt> {
+  const tasks: Promise<OcrAttempt>[] = [];
+
+  if (visionKey) {
+    tasks.push(
+      runGoogleVision(imageBase64, visionKey).then((r) => ({ ...r, provider: "google" }))
+    );
+  }
+  if (geminiKey) {
+    tasks.push(
+      runGeminiLabelRead(imageBase64, geminiKey).then((r) => ({ ...r, provider: "gemini" }))
+    );
+  }
+  if (ocrSpaceKey && imageBase64.length <= 1_350_000) {
+    tasks.push(
+      runOcrSpaceEngine(ocrSpaceKey, imageBase64, "2").then((text) => ({
+        text,
+        provider: "ocrspace",
+      }))
+    );
   }
 
-  const fullResult = await runGoogleVisionBatch(apiKey, [imageBase64]);
-  return { text: fullResult.text, detail: fullResult.detail };
+  const results = await Promise.all(tasks);
+  let best: OcrAttempt = { text: null, detail: "ocr_miss" };
+
+  for (const result of results) {
+    if (result.detail && !result.text && !best.detail) best.detail = result.detail;
+    if (!result.text) continue;
+    const score = scoreText(result.text);
+    const bestScore = best.text ? scoreText(best.text) : 0;
+    if (score > bestScore) best = result;
+  }
+
+  return best;
 }
 
-function countUsefulLines(text: string): number {
-  return text
+function scoreText(text: string): number {
+  const lines = text
     .split(/\r?\n/)
-    .map((line) => line.trim())
-    .filter((line) => line.length >= 2).length;
+    .map((l) => l.trim())
+    .filter((l) => l.length >= 2);
+  let score = lines.length * 10;
+  if (/\d{4,8}/.test(text)) score += 15;
+  if (/blue foam|solid|muslin|duvet|velvet|chroma|foam|bounce/i.test(text)) score += 10;
+  if (/\d+\s*['′]?\s*[xX×]\s*\d+/i.test(text)) score += 10;
+  return score;
 }
 
-async function runGoogleVisionBatch(
-  apiKey: string,
-  imagesBase64: string[]
-): Promise<{ text: string | null; detail?: string }> {
-  if (!imagesBase64.length) return { text: null };
-
+async function runGoogleVision(
+  imageBase64: string,
+  apiKey: string
+): Promise<OcrAttempt> {
   const visionRes = await fetch(
     `https://vision.googleapis.com/v1/images:annotate?key=${apiKey}`,
     {
       method: "POST",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({
-        requests: imagesBase64.map((content) => ({
-          image: { content },
-          features: [{ type: "DOCUMENT_TEXT_DETECTION", maxResults: 1 }],
-          imageContext: { languageHints: ["en"] },
-        })),
+        requests: [
+          {
+            image: { content: imageBase64 },
+            features: [
+              { type: "DOCUMENT_TEXT_DETECTION", maxResults: 1 },
+              { type: "TEXT_DETECTION", maxResults: 1 },
+            ],
+            imageContext: { languageHints: ["en"] },
+          },
+        ],
       }),
     }
   );
 
   if (!visionRes.ok) {
     const errBody = await visionRes.text();
-    console.warn("Google Vision HTTP", visionRes.status, errBody.slice(0, 320));
-    const detail =
-      visionRes.status === 403 || /billing|PERMISSION_DENIED/i.test(errBody) ? "google_billing" : undefined;
-    return { text: null, detail };
+    console.warn("Google Vision HTTP", visionRes.status, errBody.slice(0, 400));
+    if (/billing/i.test(errBody)) return { text: null, detail: "google_billing" };
+    if (visionRes.status === 403) return { text: null, detail: "google_api_disabled" };
+    return { text: null };
   }
 
   const vision = (await visionRes.json()) as VisionResponse;
-  const chunks: string[] = [];
-
-  for (const block of vision.responses ?? []) {
-    if (block?.error?.message) {
-      console.warn("Google Vision block error:", block.error.message);
-      continue;
-    }
-    const text = block?.fullTextAnnotation?.text?.trim();
-    if (text) chunks.push(text);
+  const block = vision.responses?.[0];
+  if (block?.error?.message) {
+    console.warn("Google Vision error:", block.error.message);
+    return { text: null };
   }
 
-  if (!chunks.length) return { text: null };
-  return { text: mergeOcrTexts(chunks) };
+  const text = block?.fullTextAnnotation?.text?.trim() ?? "";
+  return { text: text || null };
 }
 
-async function runOcrSpaceCombined(
-  apiKey: string,
-  imageBase64: string,
-  stripsBase64: string[]
-): Promise<string | null> {
-  if (stripsBase64.length >= 3) {
-    const stripTexts = await Promise.all(
-      stripsBase64.slice(0, 3).map((strip) => runOcrSpaceEngine(apiKey, strip, "2"))
+async function runGeminiLabelRead(imageBase64: string, apiKey: string): Promise<OcrAttempt> {
+  try {
+    const res = await fetch(
+      `https://generativelanguage.googleapis.com/v1beta/models/gemini-2.0-flash:generateContent?key=${apiKey}`,
+      {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          contents: [
+            {
+              role: "user",
+              parts: [
+                {
+                  text:
+                    "Read the white rental fabric label in this photo. It has 3 lines: job number (digits), fabric name, size (like 40' x 60'). Reply with exactly 3 lines only — job, fabric, size. No other words.",
+                },
+                { inline_data: { mime_type: "image/jpeg", data: imageBase64 } },
+              ],
+            },
+          ],
+          generationConfig: { temperature: 0, maxOutputTokens: 80 },
+        }),
+      }
     );
-    const ordered = stripTexts.map((t) => t?.trim() ?? "");
-    const filled = ordered.filter(Boolean);
-    if (filled.length >= 2) {
-      return filled.join("\n");
-    }
-    if (filled.length === 1 && imageBase64.length <= 1_350_000) {
-      const full = await runOcrSpaceEngine(apiKey, imageBase64, "2");
-      if (full) return mergeOcrTexts([filled[0]!, full]);
-      return filled[0]!;
-    }
-    if (filled.length === 1) return filled[0]!;
-  }
 
-  if (imageBase64.length > 1_350_000) return null;
-  return runOcrSpaceEngine(apiKey, imageBase64, "2");
-}
-
-function mergeOcrTexts(chunks: string[]): string {
-  const lines = new Set<string>();
-  for (const chunk of chunks) {
-    for (const line of chunk.split(/\r?\n/)) {
-      const trimmed = line.trim();
-      if (trimmed.length >= 2) lines.add(trimmed);
+    if (!res.ok) {
+      const errBody = await res.text();
+      console.warn("Gemini HTTP", res.status, errBody.slice(0, 400));
+      if (/API_KEY|PERMISSION|billing/i.test(errBody)) {
+        return { text: null, detail: "google_api_disabled" };
+      }
+      return { text: null };
     }
+
+    const body = (await res.json()) as GeminiResponse;
+    const text = body.candidates?.[0]?.content?.parts?.[0]?.text?.trim() ?? "";
+    return { text: text || null };
+  } catch (e) {
+    console.warn("Gemini error:", e);
+    return { text: null };
   }
-  return [...lines].join("\n");
 }
 
 async function runOcrSpaceEngine(
@@ -221,8 +251,6 @@ async function runOcrSpaceEngine(
   imageBase64: string,
   engine: string
 ): Promise<string | null> {
-  if (imageBase64.length > 1_350_000) return null;
-
   const form = new URLSearchParams();
   form.set("apikey", apiKey);
   form.set("base64Image", `data:image/jpeg;base64,${imageBase64}`);
@@ -243,7 +271,7 @@ async function runOcrSpaceEngine(
 
   const payload = (await res.json()) as OcrSpaceResponse;
   if (payload.OCRExitCode !== 1) {
-    console.warn("OCR.space engine", engine, payload.ErrorMessage ?? payload.OCRExitCode);
+    console.warn("OCR.space", payload.ErrorMessage ?? payload.OCRExitCode);
     return null;
   }
 
