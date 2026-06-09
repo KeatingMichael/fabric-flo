@@ -1165,6 +1165,20 @@ p {
   pointer-events: none;
 }
 
+.scan-viewfinder__quality {
+  position: absolute;
+  left: 50%;
+  bottom: 4.75rem;
+  transform: translateX(-50%);
+  z-index: 2;
+  padding: 0.3rem 0.7rem;
+  border-radius: 999px;
+  background: rgba(2, 6, 23, 0.65);
+  font-size: 0.78rem;
+  pointer-events: none;
+  white-space: nowrap;
+}
+
 .scan-place-setup__note {
   margin: 0;
 }

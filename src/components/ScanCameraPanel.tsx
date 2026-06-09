@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import { playCameraShutter } from "@/lib/cameraFeedback";
 import { hapticCameraCapture, hapticSuccess } from "@/lib/haptics";
 import { cropVideoFrameToGuide } from "@/lib/labelOcrImage";
@@ -8,6 +8,11 @@ import {
   type ScanReadPhase,
 } from "@/lib/labelOcrCloud";
 import type { LabelOcrFields } from "@/lib/labelOcr";
+import {
+  assessLabelFrameQualityThrottled,
+  AUTO_CAPTURE_QUALITY_THRESHOLD,
+  AUTO_CAPTURE_STABLE_MS,
+} from "@/lib/labelScanQuality";
 import { captureVideoFrame, decodeQrFromCanvas } from "@/lib/scanQrFromImage";
 
 type ScanMode = "qr" | "label";
@@ -22,6 +27,7 @@ type Props = {
   onLabelScan?: (outcome: LabelScanOutcome) => void;
   onCameraError?: (message: string | null) => void;
   onScanStart?: () => void;
+  autoCapture?: boolean;
 };
 
 function triggerCaptureFeedback(setFlash: (on: boolean) => void): void {
@@ -38,13 +44,18 @@ export function ScanCameraPanel({
   onLabelScan,
   onCameraError,
   onScanStart,
+  autoCapture = true,
 }: Props) {
   const videoRef = useRef<HTMLVideoElement>(null);
   const scanGenRef = useRef(0);
+  const stableSinceRef = useRef<number | null>(null);
+  const scanInFlightRef = useRef(false);
   const [ready, setReady] = useState(false);
   const [busy, setBusy] = useState(false);
   const [readPhase, setReadPhase] = useState<ScanReadPhase | null>(null);
   const [flash, setFlash] = useState(false);
+  const [frameQuality, setFrameQuality] = useState(0);
+  const [autoReady, setAutoReady] = useState(false);
 
   useEffect(() => {
     let stream: MediaStream | null = null;
@@ -85,19 +96,24 @@ export function ScanCameraPanel({
     };
   }, [mode, onCameraError]);
 
-  async function onScan() {
+  const runScan = useCallback(async () => {
     const video = videoRef.current;
-    if (!video || !ready || busy) return;
+    if (!video || !ready || busy || scanInFlightRef.current) return;
 
+    scanInFlightRef.current = true;
     triggerCaptureFeedback(setFlash);
     const scanGen = ++scanGenRef.current;
     if (mode === "label") onScanStart?.();
     setBusy(true);
     setReadPhase(null);
+    setAutoReady(false);
+    stableSinceRef.current = null;
+
     const hardCap = window.setTimeout(() => {
       if (scanGenRef.current !== scanGen) return;
       setBusy(false);
       setReadPhase(null);
+      scanInFlightRef.current = false;
     }, SCAN_HARD_CAP_MS);
 
     try {
@@ -145,13 +161,69 @@ export function ScanCameraPanel({
       if (scanGenRef.current !== scanGen) return;
       setBusy(false);
       setReadPhase(null);
+      scanInFlightRef.current = false;
     }
-  }
+  }, [busy, mode, onCameraError, onLabelFields, onLabelScan, onQrDecoded, onScanStart, ready]);
+
+  // Plan B: auto-capture when frame is sharp and label is visible
+  useEffect(() => {
+    if (mode !== "label" || !autoCapture || !ready || busy) {
+      setAutoReady(false);
+      stableSinceRef.current = null;
+      return;
+    }
+
+    let raf = 0;
+    const tick = () => {
+      const video = videoRef.current;
+      if (!video || busy || scanInFlightRef.current) {
+        raf = window.requestAnimationFrame(tick);
+        return;
+      }
+
+      const quality = assessLabelFrameQualityThrottled(video);
+      if (quality) {
+        setFrameQuality(Math.round(quality.score));
+        if (quality.score >= AUTO_CAPTURE_QUALITY_THRESHOLD) {
+          if (!stableSinceRef.current) stableSinceRef.current = Date.now();
+          const stableMs = Date.now() - stableSinceRef.current;
+          if (stableMs >= AUTO_CAPTURE_STABLE_MS) {
+            setAutoReady(true);
+            void runScan();
+            return;
+          }
+        } else {
+          stableSinceRef.current = null;
+          setAutoReady(false);
+        }
+      }
+
+      raf = window.requestAnimationFrame(tick);
+    };
+
+    raf = window.requestAnimationFrame(tick);
+    return () => window.cancelAnimationFrame(raf);
+  }, [autoCapture, busy, mode, ready, runScan]);
 
   const readingLabel =
-    readPhase === "phone" || readPhase === "cloud"
-      ? "Reading sticker…"
-      : "Reading…";
+    readPhase === "native"
+      ? "Reading on device…"
+      : readPhase === "phone"
+        ? "Reading sticker…"
+        : readPhase === "cloud"
+          ? "Reading sticker…"
+          : "Reading…";
+
+  const qualityHint =
+    mode === "label" && ready && !busy
+      ? autoReady
+        ? "Capturing…"
+        : frameQuality >= AUTO_CAPTURE_QUALITY_THRESHOLD
+          ? "Hold steady…"
+          : frameQuality > 40
+            ? "Move closer to the label"
+            : "Center the white sticker in frame"
+      : null;
 
   return (
     <div className="scan-camera">
@@ -167,6 +239,11 @@ export function ScanCameraPanel({
         {!ready ? (
           <div className="scan-viewfinder__loading muted">Starting camera…</div>
         ) : null}
+        {qualityHint && !busy ? (
+          <div className="scan-viewfinder__quality muted" role="status">
+            {qualityHint}
+          </div>
+        ) : null}
         {busy ? (
           <div className="scan-viewfinder__reading muted" role="status">
             {readingLabel}
@@ -179,7 +256,7 @@ export function ScanCameraPanel({
           onPointerDown={(e) => {
             e.preventDefault();
             if (!ready || busy) return;
-            void onScan();
+            void runScan();
           }}
         >
           {busy ? "Reading…" : "Scan"}

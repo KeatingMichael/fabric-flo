@@ -1,12 +1,9 @@
 /**
  * Handwriting OCR for rental labels (Supabase Edge Function).
  *
- * Deploy: supabase functions deploy label-ocr --project-ref YOUR_PROJECT_REF
- *
- * Secrets:
- *   GOOGLE_VISION_API_KEY  — Cloud Vision (billing + Vision API enabled)
- *   GEMINI_API_KEY         — optional Gemini Flash (Generative Language API)
- *   OCR_SPACE_API_KEY      — OCR.space fallback (always worth setting)
+ * Plan A: Gemini structured JSON (primary, fast)
+ * Plan C: Three-band strip reads merged with full-label read
+ * Fallback: Vision + OCR.space text candidates for client parsing
  */
 import { createClient } from "https://esm.sh/@supabase/supabase-js@2.49.1";
 
@@ -39,8 +36,15 @@ type LabelOcrBody = {
   stripsBase64?: string[];
 };
 
+type LabelFields = {
+  job: string;
+  fabric: string;
+  size: string;
+};
+
 type OcrAttempt = {
   text: string | null;
+  fields?: LabelFields | null;
   provider?: string;
   detail?: string;
 };
@@ -49,6 +53,18 @@ type ScoredCandidate = {
   text: string;
   provider?: string;
   score: number;
+};
+
+const EMPTY_FIELDS: LabelFields = { job: "", fabric: "", size: "" };
+
+const GEMINI_SCHEMA = {
+  type: "OBJECT",
+  properties: {
+    job: { type: "STRING", description: "Job number, digits only" },
+    fabric: { type: "STRING", description: "Fabric type name in uppercase" },
+    size: { type: "STRING", description: "Size like 40' x 60'" },
+  },
+  required: ["job", "fabric", "size"],
 };
 
 Deno.serve(async (req) => {
@@ -95,21 +111,64 @@ Deno.serve(async (req) => {
     const extraImages = body.extraImagesBase64?.filter((s) => s && s.length > 32) ?? [];
     const strips = body.stripsBase64?.filter((s) => s && s.length > 32) ?? [];
 
+    const images = [imageBase64, altImageBase64, ...extraImages].filter(
+      (img): img is string => Boolean(img && img.length > 32)
+    );
+
+    let structuredFields: LabelFields | null = null;
+    let structuredProvider = "gemini";
+
+    // Plan A: Gemini structured read on primary image (fast path)
+    if (geminiKey) {
+      structuredFields = await runGeminiStructured(imageBase64, geminiKey, "full");
+      if (!isStrongFields(structuredFields) && altImageBase64) {
+        const altFields = await runGeminiStructured(altImageBase64, geminiKey, "full");
+        if (scoreFields(altFields) > scoreFields(structuredFields)) {
+          structuredFields = altFields;
+        }
+      }
+    }
+
+    // Plan C: Three-band strip reads via Gemini
+    if (geminiKey && strips.length >= 3) {
+      const stripFields = await runGeminiStripMerge(strips.slice(0, 3), geminiKey);
+      if (scoreFields(stripFields) > scoreFields(structuredFields)) {
+        structuredFields = stripFields;
+        structuredProvider = "gemini-strips";
+      }
+    }
+
+    if (isStrongFields(structuredFields)) {
+      const text = fieldsToText(structuredFields!);
+      return json({
+        text,
+        rawText: text,
+        fields: structuredFields,
+        provider: structuredProvider,
+        candidates: [{ text, provider: structuredProvider }],
+      });
+    }
+
+    // Fallback: parallel text OCR for client-side parsing
     const { best, candidates } = await runAllProviders(
-      [imageBase64, altImageBase64, ...extraImages].filter(
-        (img): img is string => Boolean(img && img.length > 32)
-      ),
+      images,
       strips,
       visionKey,
       geminiKey,
       ocrSpaceKey
     );
 
-    if (best.text) {
+    const fallbackFields = structuredFields && hasAnyField(structuredFields)
+      ? structuredFields
+      : best.fields;
+
+    if (best.text || fallbackFields) {
+      const text = best.text ?? fieldsToText(fallbackFields ?? EMPTY_FIELDS);
       return json({
-        text: best.text,
-        rawText: best.text,
-        provider: best.provider ?? "unknown",
+        text,
+        rawText: text,
+        fields: fallbackFields ?? undefined,
+        provider: best.provider ?? structuredProvider,
         candidates: candidates.slice(0, 10).map(({ text, provider }) => ({ text, provider })),
       });
     }
@@ -126,6 +185,132 @@ Deno.serve(async (req) => {
   }
 });
 
+function hasAnyField(fields: LabelFields): boolean {
+  return Boolean(fields.job || fields.fabric || fields.size);
+}
+
+function isStrongFields(fields: LabelFields | null): boolean {
+  if (!fields) return false;
+  const jobDigits = fields.job.replace(/\D/g, "");
+  const fabric = fields.fabric.trim();
+  const size = fields.size.trim();
+  return (
+    jobDigits.length >= 5 &&
+    jobDigits.length <= 7 &&
+    fabric.length >= 3 &&
+    !/^\d+$/.test(fabric) &&
+    /\d+\s*['′]?\s*[xX×]\s*\d+/i.test(size)
+  );
+}
+
+function scoreFields(fields: LabelFields | null): number {
+  if (!fields) return 0;
+  let score = 0;
+  const jobDigits = fields.job.replace(/\D/g, "");
+  if (jobDigits.length >= 5 && jobDigits.length <= 7) score += 40;
+  if (fields.fabric.trim().length >= 3) score += 30;
+  if (/\d+\s*['′]?\s*[xX×]\s*\d+/i.test(fields.size)) score += 30;
+  if (/^\d+$/.test(fields.fabric.trim())) score -= 50;
+  return score;
+}
+
+function fieldsToText(fields: LabelFields): string {
+  return [fields.job, fields.fabric, fields.size].filter(Boolean).join("\n");
+}
+
+function normalizeStructuredFields(raw: LabelFields): LabelFields {
+  return {
+    job: raw.job.replace(/[Oo]/g, "0").replace(/[Il|]/g, "1").replace(/\D/g, "").slice(0, 8),
+    fabric: raw.fabric.trim().toUpperCase().replace(/\s+/g, " "),
+    size: raw.size.trim().replace(/[×]/g, "x"),
+  };
+}
+
+function parseGeminiJson(text: string): LabelFields | null {
+  try {
+    const obj = JSON.parse(text) as Partial<LabelFields>;
+    if (!obj || typeof obj !== "object") return null;
+    return normalizeStructuredFields({
+      job: String(obj.job ?? ""),
+      fabric: String(obj.fabric ?? ""),
+      size: String(obj.size ?? ""),
+    });
+  } catch {
+    return null;
+  }
+}
+
+async function runGeminiStructured(
+  imageBase64: string,
+  apiKey: string,
+  mode: "full" | "job" | "fabric" | "size"
+): Promise<LabelFields | null> {
+  const prompts: Record<typeof mode, string> = {
+    full:
+      "Read the white rental fabric label with 3 lines: job number (digits), fabric name, size. Return JSON only.",
+    job: "This image is ONLY the top line of a rental label — the job number. Return JSON with job (digits only), fabric empty string, size empty string.",
+    fabric:
+      "This image is ONLY the middle line of a rental label — the fabric name. Return JSON with job empty, fabric name uppercase, size empty.",
+    size: "This image is ONLY the bottom line of a rental label — the size like 40' x 60'. Return JSON with job and fabric empty, size filled.",
+  };
+
+  try {
+    const res = await fetch(
+      `https://generativelanguage.googleapis.com/v1beta/models/gemini-2.0-flash:generateContent?key=${apiKey}`,
+      {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          contents: [
+            {
+              role: "user",
+              parts: [
+                { text: prompts[mode] },
+                { inline_data: { mime_type: "image/jpeg", data: imageBase64 } },
+              ],
+            },
+          ],
+          generationConfig: {
+            temperature: 0,
+            maxOutputTokens: 120,
+            responseMimeType: "application/json",
+            responseSchema: GEMINI_SCHEMA,
+          },
+        }),
+      }
+    );
+
+    if (!res.ok) {
+      console.warn("Gemini structured HTTP", res.status, await res.text());
+      return null;
+    }
+
+    const body = (await res.json()) as GeminiResponse;
+    const text = body.candidates?.[0]?.content?.parts?.[0]?.text?.trim() ?? "";
+    return parseGeminiJson(text);
+  } catch (e) {
+    console.warn("Gemini structured error:", e);
+    return null;
+  }
+}
+
+async function runGeminiStripMerge(strips: string[], apiKey: string): Promise<LabelFields | null> {
+  const modes: Array<"job" | "fabric" | "size"> = ["job", "fabric", "size"];
+  const results = await Promise.all(
+    strips.map((strip, index) => runGeminiStructured(strip, apiKey, modes[index] ?? "full"))
+  );
+
+  const merged: LabelFields = { job: "", fabric: "", size: "" };
+  for (const result of results) {
+    if (!result) continue;
+    if (result.job) merged.job = result.job;
+    if (result.fabric) merged.fabric = result.fabric;
+    if (result.size) merged.size = result.size;
+  }
+
+  return hasAnyField(merged) ? merged : null;
+}
+
 async function runAllProviders(
   images: string[],
   stripsBase64: string[],
@@ -139,15 +324,9 @@ async function runAllProviders(
     if (visionKey) {
       tasks.push(runGoogleVision(img, visionKey).then((r) => ({ ...r, provider: "google" })));
     }
-    if (geminiKey) {
-      tasks.push(runGeminiLabelRead(img, geminiKey).then((r) => ({ ...r, provider: "gemini" })));
-    }
     if (ocrSpaceKey && img.length <= 1_350_000) {
       tasks.push(
         runOcrSpaceEngine(ocrSpaceKey, img, "2").then((text) => ({ text, provider: "ocrspace" }))
-      );
-      tasks.push(
-        runOcrSpaceEngine(ocrSpaceKey, img, "1").then((text) => ({ text, provider: "ocrspace" }))
       );
     }
   }
@@ -156,7 +335,10 @@ async function runAllProviders(
     for (const strip of stripsBase64.slice(0, 3)) {
       if (strip.length > 1_350_000) continue;
       tasks.push(
-        runOcrSpaceEngine(ocrSpaceKey, strip, "2").then((text) => ({ text, provider: "ocrspace-strip" }))
+        runOcrSpaceEngine(ocrSpaceKey, strip, "2").then((text) => ({
+          text,
+          provider: "ocrspace-strip",
+        }))
       );
     }
   }
@@ -209,7 +391,6 @@ function scoreText(text: string): number {
 
   for (const line of lines) {
     if (/^\d$/.test(line)) score -= 40;
-    if (line.length === 2 && !/[xX]/.test(line)) score -= 15;
   }
 
   return score;
@@ -225,10 +406,7 @@ async function runGoogleVision(imageBase64: string, apiKey: string): Promise<Ocr
         requests: [
           {
             image: { content: imageBase64 },
-            features: [
-              { type: "DOCUMENT_TEXT_DETECTION", maxResults: 1 },
-              { type: "TEXT_DETECTION", maxResults: 1 },
-            ],
+            features: [{ type: "DOCUMENT_TEXT_DETECTION", maxResults: 1 }],
             imageContext: { languageHints: ["en"] },
           },
         ],
@@ -253,45 +431,6 @@ async function runGoogleVision(imageBase64: string, apiKey: string): Promise<Ocr
 
   const text = block?.fullTextAnnotation?.text?.trim() ?? "";
   return { text: text || null };
-}
-
-async function runGeminiLabelRead(imageBase64: string, apiKey: string): Promise<OcrAttempt> {
-  try {
-    const res = await fetch(
-      `https://generativelanguage.googleapis.com/v1beta/models/gemini-2.0-flash:generateContent?key=${apiKey}`,
-      {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          contents: [
-            {
-              role: "user",
-              parts: [
-                {
-                  text:
-                    "Read the white rental fabric label. Reply with exactly 3 lines: job number (digits only), fabric name, size. Example:\n236998\nBLUE FOAM\n40' x 60'",
-                },
-                { inline_data: { mime_type: "image/jpeg", data: imageBase64 } },
-              ],
-            },
-          ],
-          generationConfig: { temperature: 0, maxOutputTokens: 80 },
-        }),
-      }
-    );
-
-    if (!res.ok) {
-      console.warn("Gemini HTTP", res.status, await res.text());
-      return { text: null };
-    }
-
-    const body = (await res.json()) as GeminiResponse;
-    const text = body.candidates?.[0]?.content?.parts?.[0]?.text?.trim() ?? "";
-    return { text: text || null };
-  } catch (e) {
-    console.warn("Gemini error:", e);
-    return { text: null };
-  }
 }
 
 async function runOcrSpaceEngine(

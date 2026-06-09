@@ -8,9 +8,11 @@ import {
   looksLikeWeakJobLine,
   looksLikeWeakSizeLine,
   pickBestFieldsFromOcrTexts,
+  polishLabelFields,
   scoreParsedLabelFields,
   type LabelOcrFields,
 } from "@/lib/labelOcr";
+import { recognizeLabelOnDevice } from "@/lib/labelOcrNative";
 import {
   hasAnyLabelField,
   readLabelOnPhone,
@@ -27,6 +29,7 @@ type LabelOcrResponse = {
   provider?: string;
   detail?: string;
   candidates?: OcrCandidate[];
+  fields?: LabelOcrFields;
 };
 
 type LabelOcrRequest = {
@@ -49,14 +52,15 @@ export type LabelOcrCloudOutcome = {
   fields: LabelOcrFields;
   status: LabelOcrCloudStatus;
   detail?: string;
+  provider?: string;
 };
 
 export type LabelScanOutcome = LabelOcrCloudOutcome & { message: string };
 
-export type ScanReadPhase = "cloud" | "phone";
+export type ScanReadPhase = "native" | "cloud" | "phone";
 
-const CLOUD_OCR_TIMEOUT_MS = 22_000;
-const PHONE_OCR_TIMEOUT_MS = 12_000;
+const CLOUD_OCR_TIMEOUT_MS = 14_000;
+const PHONE_OCR_TIMEOUT_MS = 10_000;
 const SCAN_CLOUD_MAX_EDGE = 2400;
 const EMPTY_FIELDS: LabelOcrFields = { job: "", fabric: "", size: "" };
 
@@ -118,6 +122,10 @@ function collectOcrTexts(payload: LabelOcrResponse | null): string[] {
 }
 
 function fieldsFromPayload(payload: LabelOcrResponse | null): LabelOcrFields {
+  if (payload?.fields && hasAnyLabelField(payload.fields)) {
+    const raw = payload.text?.trim() || payload.rawText?.trim() || collectOcrTexts(payload)[0] || "";
+    return polishLabelFields(raw, payload.fields);
+  }
   const texts = collectOcrTexts(payload);
   if (!texts.length) return EMPTY_FIELDS;
   return pickBestFieldsFromOcrTexts(texts);
@@ -134,17 +142,19 @@ function outcomeFromPayload(payload: LabelOcrResponse | null): LabelOcrCloudOutc
   if (payload.error === "no_text_detected" || !hasAnyLabelField(fields)) {
     return { fields: EMPTY_FIELDS, status: "no_text", detail: payload.detail };
   }
-  return { fields, status: scoreFields(fields), detail: payload.detail };
+  return {
+    fields,
+    status: scoreFields(fields),
+    detail: payload.detail,
+    provider: payload.provider,
+  };
 }
 
 function toBase64(canvas: HTMLCanvasElement): string {
   return shrinkJpegForCloud(canvas).replace(/^data:image\/\w+;base64,/, "");
 }
 
-function prepareCloudRequest(
-  source: HTMLCanvasElement,
-  _jpegDataUrl?: string
-): LabelOcrRequest {
+function prepareCloudRequest(source: HTMLCanvasElement): LabelOcrRequest {
   const { natural, binarized, rotated } = prepareLabelScanVariants(source, SCAN_CLOUD_MAX_EDGE);
   return {
     imageBase64: toBase64(natural),
@@ -158,16 +168,46 @@ function pickBetterFields(a: LabelOcrFields, b: LabelOcrFields): LabelOcrFields 
   return scoreParsedLabelFields(b) > scoreParsedLabelFields(a) ? b : a;
 }
 
-/** Cloud OCR with on-phone block read fallback when cloud misses or is weak. */
+function outcomeFromFields(
+  fields: LabelOcrFields,
+  provider: string,
+  detail?: string
+): LabelOcrCloudOutcome {
+  return {
+    fields,
+    status: scoreFields(fields),
+    detail,
+    provider,
+  };
+}
+
+/** Native → cloud (Gemini structured) → on-phone Tesseract fallback. */
 export async function scanLabelFromCapture(
   source: HTMLCanvasElement,
-  jpegDataUrl?: string,
+  _jpegDataUrl?: string,
   onPhase?: (phase: ScanReadPhase) => void
 ): Promise<LabelScanOutcome> {
-  const request = prepareCloudRequest(source, jpegDataUrl);
+  const jpegBase64 = source.toDataURL("image/jpeg", 0.9).replace(/^data:image\/\w+;base64,/, "");
+
+  onPhase?.("native");
+  const nativeFields = await recognizeLabelOnDevice(jpegBase64);
+  if (nativeFields && scoreFields(nativeFields) === "success") {
+    return {
+      ...outcomeFromFields(nativeFields, "native-vision"),
+      message: labelScanStatusMessage("success"),
+    };
+  }
 
   onPhase?.("cloud");
-  let outcome = await recognizeLabelFieldsCloudWithStatus(request);
+  let outcome = await recognizeLabelFieldsCloudWithStatus(prepareCloudRequest(source));
+  if (nativeFields && hasAnyLabelField(nativeFields)) {
+    outcome = {
+      ...outcome,
+      fields: pickBetterFields(outcome.fields, nativeFields),
+      status: scoreFields(pickBetterFields(outcome.fields, nativeFields)),
+      provider: outcome.provider ?? "native-vision",
+    };
+  }
 
   const cloudWeak =
     !hasAnyLabelField(outcome.fields) ||
@@ -185,6 +225,7 @@ export async function scanLabelFromCapture(
         fields: merged,
         status: scoreFields(merged),
         detail: outcome.detail,
+        provider: outcome.provider ?? "phone-tesseract",
       };
     }
   }
@@ -274,6 +315,9 @@ export function labelScanStatusMessage(status: LabelOcrCloudStatus, detail?: str
   }
   if (detail === "google_api_disabled") {
     return "Enable Cloud Vision API in Google Cloud, then Scan again.";
+  }
+  if (detail === "gemini_not_configured") {
+    return "Add GEMINI_API_KEY in Supabase for best label reads, or fix fields below.";
   }
   switch (status) {
     case "offline":

@@ -6,6 +6,7 @@ import { useActiveProduction, useApp } from "@/context/AppStore";
 import { hapticSuccess } from "@/lib/haptics";
 import { joinLabelFields, looksLikeWeakFabricLine, looksLikeWeakJobLine, looksLikeWeakSizeLine } from "@/lib/labelOcr";
 import type { LabelScanOutcome } from "@/lib/labelOcrCloud";
+import { validateLabelFieldsAgainstInventory } from "@/lib/labelInventoryValidate";
 import {
   getLastLocationId,
   getRecentLocationIds,
@@ -147,23 +148,42 @@ export function ScanPage() {
       return;
     }
 
-    setLabelJob(outcome.fields.job);
-    setLabelFabric(outcome.fields.fabric);
-    setLabelSize(outcome.fields.size);
+    let fields = outcome.fields;
+    let status = outcome.status;
+    let message = outcome.message;
+
+    if (production) {
+      const validated = validateLabelFieldsAgainstInventory(production, fields);
+      fields = validated.fields;
+      if (validated.corrected) {
+        status = looksLikeWeakJobLine(fields.job) ||
+          looksLikeWeakFabricLine(fields.fabric) ||
+          looksLikeWeakSizeLine(fields.size)
+          ? "partial"
+          : "success";
+        message = validated.hint ?? outcome.message;
+      } else if (validated.hint) {
+        message = validated.hint;
+      }
+    }
+
+    setLabelJob(fields.job);
+    setLabelFabric(fields.fabric);
+    setLabelSize(fields.size);
 
     if (production && production.locations.length === 0) {
       setHint("Label read — add a place above, then Add to Log.");
       window.setTimeout(() => quickLocNameRef.current?.focus(), 120);
-    } else if (outcome.status === "partial") {
-      setHint(outcome.message);
+    } else if (status === "partial") {
+      setHint(message);
     } else {
-      setHint("Label read — pick a place and Add to Log.");
+      setHint(message === outcome.message ? "Label read — pick a place and Add to Log." : message);
     }
 
-    if (looksLikeWeakJobLine(outcome.fields.job)) focusFieldAfterScan.current = "job";
-    else if (looksLikeWeakFabricLine(outcome.fields.fabric)) focusFieldAfterScan.current = "fabric";
-    else if (looksLikeWeakSizeLine(outcome.fields.size)) focusFieldAfterScan.current = "size";
-    else if (!outcome.fields.job) focusFieldAfterScan.current = "job";
+    if (looksLikeWeakJobLine(fields.job)) focusFieldAfterScan.current = "job";
+    else if (looksLikeWeakFabricLine(fields.fabric)) focusFieldAfterScan.current = "fabric";
+    else if (looksLikeWeakSizeLine(fields.size)) focusFieldAfterScan.current = "size";
+    else if (!fields.job) focusFieldAfterScan.current = "job";
   }
 
   function focusPlacePicker() {
