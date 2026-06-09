@@ -61,7 +61,7 @@ export type LabelScanOutcome = LabelOcrCloudOutcome & { message: string };
 
 export type ScanReadPhase = "native" | "cloud" | "phone";
 
-const CLOUD_OCR_TIMEOUT_MS = 14_000;
+const CLOUD_OCR_TIMEOUT_MS = 22_000;
 const PHONE_OCR_TIMEOUT_MS = 10_000;
 const SCAN_CLOUD_MAX_EDGE = 2400;
 const EMPTY_FIELDS: LabelOcrFields = { job: "", fabric: "", size: "" };
@@ -123,14 +123,25 @@ function collectOcrTexts(payload: LabelOcrResponse | null): string[] {
   return texts;
 }
 
+function sanitizeLabelFields(fields: LabelOcrFields): LabelOcrFields {
+  const job = fields.job.replace(/\D/g, "");
+  const fabric = fields.fabric.trim();
+  const size = fields.size.trim();
+  return {
+    job: job.length >= 4 ? job : "",
+    fabric: fabric.length >= 3 && !/^\d+$/.test(fabric) ? fabric : "",
+    size: looksLikeWeakSizeLine(size) ? "" : size,
+  };
+}
+
 function fieldsFromPayload(payload: LabelOcrResponse | null): LabelOcrFields {
   if (payload?.fields && hasAnyLabelField(payload.fields)) {
     const raw = payload.text?.trim() || payload.rawText?.trim() || collectOcrTexts(payload)[0] || "";
-    return polishLabelFields(raw, payload.fields);
+    return sanitizeLabelFields(polishLabelFields(raw, payload.fields));
   }
   const texts = collectOcrTexts(payload);
   if (!texts.length) return EMPTY_FIELDS;
-  return pickBestFieldsFromOcrTexts(texts);
+  return sanitizeLabelFields(pickBestFieldsFromOcrTexts(texts));
 }
 
 function outcomeFromPayload(payload: LabelOcrResponse | null): LabelOcrCloudOutcome {
@@ -171,8 +182,16 @@ function prepareCloudRequest(source: HTMLCanvasElement): LabelOcrRequest {
   };
 }
 
-function pickBetterFields(a: LabelOcrFields, b: LabelOcrFields): LabelOcrFields {
-  return scoreParsedLabelFields(b) > scoreParsedLabelFields(a) ? b : a;
+function shouldSkipPhoneFallback(outcome: LabelOcrCloudOutcome): boolean {
+  if (!outcome.provider?.includes("gemini")) return false;
+  return scoreParsedLabelFields(outcome.fields) >= 40;
+}
+
+function mergeIfBetter(current: LabelOcrFields, next: LabelOcrFields): LabelOcrFields {
+  const currentScore = scoreParsedLabelFields(current);
+  const nextScore = scoreParsedLabelFields(next);
+  if (nextScore >= currentScore + 12) return next;
+  return current;
 }
 
 function outcomeFromFields(
@@ -210,36 +229,38 @@ export async function scanLabelFromCapture(
   if (nativeFields && hasAnyLabelField(nativeFields)) {
     outcome = {
       ...outcome,
-      fields: pickBetterFields(outcome.fields, nativeFields),
-      status: scoreFields(pickBetterFields(outcome.fields, nativeFields)),
+      fields: mergeIfBetter(outcome.fields, sanitizeLabelFields(nativeFields)),
+      status: scoreFields(mergeIfBetter(outcome.fields, sanitizeLabelFields(nativeFields))),
       provider: outcome.provider ?? "native-vision",
     };
   }
 
-  onPhase?.("phone");
-  const phoneRaw = scaleCanvas(source, 2200);
-  const phoneFields = await withTimeout(readLabelOnPhone(phoneRaw), PHONE_OCR_TIMEOUT_MS, EMPTY_FIELDS);
-  if (hasAnyLabelField(phoneFields)) {
-    const merged = pickBetterFields(outcome.fields, phoneFields);
-    outcome = {
-      fields: merged,
-      status: scoreFields(merged),
-      detail: outcome.detail,
-      provider: outcome.provider ?? "phone-tesseract",
-    };
-  } else if (!hasAnyLabelField(outcome.fields)) {
-    const phonePrepped = await withTimeout(
-      readLabelOnPhone(prepareLabelScanCanvas(source, 2200)),
-      PHONE_OCR_TIMEOUT_MS,
-      EMPTY_FIELDS
-    );
-    if (hasAnyLabelField(phonePrepped)) {
+  if (!shouldSkipPhoneFallback(outcome)) {
+    onPhase?.("phone");
+    const phoneRaw = scaleCanvas(source, 2200);
+    const phoneFields = await withTimeout(readLabelOnPhone(phoneRaw), PHONE_OCR_TIMEOUT_MS, EMPTY_FIELDS);
+    if (hasAnyLabelField(phoneFields)) {
+      const merged = mergeIfBetter(outcome.fields, sanitizeLabelFields(phoneFields));
       outcome = {
-        fields: phonePrepped,
-        status: scoreFields(phonePrepped),
+        fields: merged,
+        status: scoreFields(merged),
         detail: outcome.detail,
-        provider: "phone-tesseract",
+        provider: outcome.provider ?? "phone-tesseract",
       };
+    } else if (!hasAnyLabelField(outcome.fields)) {
+      const phonePrepped = await withTimeout(
+        readLabelOnPhone(prepareLabelScanCanvas(source, 2200)),
+        PHONE_OCR_TIMEOUT_MS,
+        EMPTY_FIELDS
+      );
+      if (hasAnyLabelField(phonePrepped)) {
+        outcome = {
+          fields: sanitizeLabelFields(phonePrepped),
+          status: scoreFields(sanitizeLabelFields(phonePrepped)),
+          detail: outcome.detail,
+          provider: "phone-tesseract",
+        };
+      }
     }
   }
 

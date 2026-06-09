@@ -172,7 +172,11 @@ export function ScanPage() {
     setLabelSize(fields.size);
 
     if (production && production.locations.length === 0) {
-      setHint("Label read — add a place above, then Add to Log.");
+      setHint(
+        status === "success"
+          ? "Label read — add a place above, then Add to Log."
+          : "Fix any field below, add a place above, then Add to Log."
+      );
       window.setTimeout(() => quickLocNameRef.current?.focus(), 120);
     } else if (status === "partial") {
       setHint(message);

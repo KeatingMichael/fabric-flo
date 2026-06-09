@@ -58,7 +58,7 @@ export function assessLabelFrameQuality(video: HTMLVideoElement): LabelFrameQual
   let lumSum = 0;
   let paperPixels = 0;
   let inkPixels = 0;
-  let inkNearEdge = false;
+  let inkNearEdgeCount = 0;
   let minX = sampleW;
   let minY = sampleH;
   let maxX = 0;
@@ -87,7 +87,7 @@ export function assessLabelFrameQuality(video: HTMLVideoElement): LabelFrameQual
       if (isInkPixel(l)) {
         inkPixels++;
         if (x <= edgeMarginX || x >= sampleW - edgeMarginX || y <= edgeMarginY || y >= sampleH - edgeMarginY) {
-          inkNearEdge = true;
+          inkNearEdgeCount++;
         }
       }
     }
@@ -100,7 +100,7 @@ export function assessLabelFrameQuality(video: HTMLVideoElement): LabelFrameQual
   const labelPresent = paperFill > 0.12;
 
   const labelTooFar = labelPresent && paperFill < 0.16;
-  const labelTooClose = labelPresent && inkPixels > 80 && inkNearEdge;
+  const labelTooClose = labelPresent && inkPixels > 120 && inkNearEdgeCount > inkPixels * 0.22;
 
   let lapSum = 0;
   let lapCount = 0;

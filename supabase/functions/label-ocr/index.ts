@@ -57,6 +57,8 @@ type ScoredCandidate = {
 
 const EMPTY_FIELDS: LabelFields = { job: "", fabric: "", size: "" };
 
+const GEMINI_MODELS = ["gemini-2.0-flash", "gemini-1.5-flash", "gemini-2.0-flash-lite"];
+
 const GEMINI_SCHEMA = {
   type: "OBJECT",
   properties: {
@@ -118,69 +120,44 @@ Deno.serve(async (req) => {
 
     let structuredFields: LabelFields | null = null;
     let structuredProvider = "gemini";
+    let geminiDetail: string | undefined;
 
-    // Plan A: Gemini structured read on primary image (fast path)
     if (geminiKey) {
-      structuredFields = await runGeminiStructured(imageBase64, geminiKey, "full");
-      if (!isStrongFields(structuredFields) && altImageBase64) {
-        const altFields = await runGeminiStructured(altImageBase64, geminiKey, "full");
-        if (scoreFields(altFields) > scoreFields(structuredFields)) {
-          structuredFields = altFields;
-        }
-      }
+      const geminiBest = await runGeminiBest(geminiKey, images, strips);
+      structuredFields = geminiBest.fields;
+      structuredProvider = geminiBest.provider;
+      geminiDetail = geminiBest.detail;
     }
 
-    // Plan C: Three-band strip reads via Gemini
-    if (geminiKey && strips.length >= 3) {
-      const stripFields = await runGeminiStripMerge(strips.slice(0, 3), geminiKey);
-      if (scoreFields(stripFields) > scoreFields(structuredFields)) {
-        structuredFields = stripFields;
-        structuredProvider = "gemini-strips";
-      }
-    }
-
-    if (isStrongFields(structuredFields)) {
-      const text = fieldsToText(structuredFields!);
-      return json({
-        text,
-        rawText: text,
-        fields: structuredFields,
-        provider: structuredProvider,
-        candidates: [{ text, provider: structuredProvider }],
-      });
-    }
-
-    if (structuredFields && scoreFields(structuredFields) >= 35) {
+    if (structuredFields && scoreFields(structuredFields) >= 25) {
       const text = fieldsToText(structuredFields);
       return json({
         text,
         rawText: text,
         fields: structuredFields,
         provider: structuredProvider,
+        detail: geminiDetail,
         candidates: [{ text, provider: structuredProvider }],
       });
     }
 
-    // Fallback: parallel text OCR for client-side parsing
-    const { best, candidates } = await runAllProviders(
-      images,
-      strips,
-      visionKey,
-      geminiKey,
-      ocrSpaceKey
+    // Fallback: Vision + OCR.space only (skip duplicate Gemini)
+    const { best, candidates } = await runAllProviders(images, strips, visionKey, ocrSpaceKey);
+
+    const fallbackFields = pickBestFields(
+      structuredFields,
+      best.fields,
+      best.text ? parseTextFields(best.text) : null
     );
 
-    const fallbackFields = structuredFields && hasAnyField(structuredFields)
-      ? structuredFields
-      : best.fields;
-
-    if (best.text || fallbackFields) {
-      const text = best.text ?? fieldsToText(fallbackFields ?? EMPTY_FIELDS);
+    if (hasAnyField(fallbackFields ?? EMPTY_FIELDS)) {
+      const text = best.text ?? fieldsToText(fallbackFields!);
       return json({
         text,
         rawText: text,
-        fields: fallbackFields ?? undefined,
+        fields: fallbackFields,
         provider: best.provider ?? structuredProvider,
+        detail: best.detail ?? geminiDetail,
         candidates: candidates.slice(0, 10).map(({ text, provider }) => ({ text, provider })),
       });
     }
@@ -189,7 +166,7 @@ Deno.serve(async (req) => {
       text: "",
       rawText: "",
       error: "no_text_detected",
-      detail: best.detail ?? (geminiKey ? "ocr_miss" : "gemini_not_configured"),
+      detail: geminiDetail ?? best.detail ?? (geminiKey ? "ocr_miss" : "gemini_not_configured"),
       candidates: [],
     });
   } catch (e) {
@@ -213,6 +190,88 @@ function isStrongFields(fields: LabelFields | null): boolean {
     !/^\d+$/.test(fabric) &&
     /\d+\s*['′]?\s*[xX×]\s*\d+/i.test(size)
   );
+}
+
+function pickBestFields(
+  ...candidates: Array<LabelFields | null | undefined>
+): LabelFields | null {
+  let best: LabelFields | null = null;
+  let bestScore = 0;
+  for (const fields of candidates) {
+    if (!fields || !hasAnyField(fields)) continue;
+    const s = scoreFields(fields);
+    if (s > bestScore) {
+      bestScore = s;
+      best = fields;
+    }
+  }
+  return best;
+}
+
+function parseTextFields(text: string): LabelFields | null {
+  const lines = text
+    .split(/\r?\n/)
+    .map((l) => l.trim())
+    .filter(Boolean);
+  if (lines.length < 2) return null;
+  const job = (lines[0] ?? "").replace(/\D/g, "");
+  return {
+    job: job.length >= 4 ? job : "",
+    fabric: (lines[1] ?? "").toUpperCase(),
+    size: lines[2] ?? "",
+  };
+}
+
+async function runGeminiBest(
+  apiKey: string,
+  images: string[],
+  strips: string[]
+): Promise<{ fields: LabelFields | null; provider: string; detail?: string }> {
+  const tasks: Promise<{ fields: LabelFields | null; provider: string; detail?: string }>[] = [];
+
+  for (const img of images.slice(0, 4)) {
+    for (const model of GEMINI_MODELS) {
+      tasks.push(
+        runGeminiStructured(img, apiKey, "full", model).then((fields) => ({
+          fields,
+          provider: `gemini:${model}`,
+        }))
+      );
+      tasks.push(
+        runGeminiPlainText(img, apiKey, model).then((fields) => ({
+          fields,
+          provider: `gemini-text:${model}`,
+        }))
+      );
+    }
+  }
+
+  if (strips.length >= 3) {
+    tasks.push(
+      runGeminiStripMerge(strips.slice(0, 3), apiKey).then((fields) => ({
+        fields,
+        provider: "gemini-strips",
+      }))
+    );
+  }
+
+  const results = await Promise.all(tasks);
+  let best: LabelFields | null = null;
+  let bestScore = 0;
+  let provider = "gemini";
+  let detail: string | undefined;
+
+  for (const result of results) {
+    if (result.detail && !detail) detail = result.detail;
+    const s = scoreFields(result.fields);
+    if (s > bestScore) {
+      bestScore = s;
+      best = result.fields;
+      provider = result.provider;
+    }
+  }
+
+  return { fields: best, provider, detail };
 }
 
 function scoreFields(fields: LabelFields | null): number {
@@ -255,7 +314,8 @@ function parseGeminiJson(text: string): LabelFields | null {
 async function runGeminiStructured(
   imageBase64: string,
   apiKey: string,
-  mode: "full" | "job" | "fabric" | "size"
+  mode: "full" | "job" | "fabric" | "size",
+  model = GEMINI_MODELS[0]!
 ): Promise<LabelFields | null> {
   const prompts: Record<typeof mode, string> = {
     full:
@@ -268,7 +328,7 @@ async function runGeminiStructured(
 
   try {
     const res = await fetch(
-      `https://generativelanguage.googleapis.com/v1beta/models/gemini-2.0-flash:generateContent?key=${apiKey}`,
+      `https://generativelanguage.googleapis.com/v1beta/models/${model}:generateContent?key=${apiKey}`,
       {
         method: "POST",
         headers: { "Content-Type": "application/json" },
@@ -293,7 +353,9 @@ async function runGeminiStructured(
     );
 
     if (!res.ok) {
-      console.warn("Gemini structured HTTP", res.status, await res.text());
+      const errBody = await res.text();
+      console.warn("Gemini structured HTTP", model, res.status, errBody.slice(0, 300));
+      if (res.status === 403) return null;
       return null;
     }
 
@@ -306,10 +368,51 @@ async function runGeminiStructured(
   }
 }
 
+async function runGeminiPlainText(
+  imageBase64: string,
+  apiKey: string,
+  model: string
+): Promise<LabelFields | null> {
+  try {
+    const res = await fetch(
+      `https://generativelanguage.googleapis.com/v1beta/models/${model}:generateContent?key=${apiKey}`,
+      {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          contents: [
+            {
+              role: "user",
+              parts: [
+                {
+                  text:
+                    "Read the rental fabric label in this photo. Reply with exactly 3 lines:\n1) job number (digits only)\n2) fabric name\n3) size like 40' x 60'",
+                },
+                { inline_data: { mime_type: "image/jpeg", data: imageBase64 } },
+              ],
+            },
+          ],
+          generationConfig: { temperature: 0, maxOutputTokens: 80 },
+        }),
+      }
+    );
+
+    if (!res.ok) return null;
+
+    const body = (await res.json()) as GeminiResponse;
+    const text = body.candidates?.[0]?.content?.parts?.[0]?.text?.trim() ?? "";
+    return parseTextFields(text) ?? parseGeminiJson(text);
+  } catch {
+    return null;
+  }
+}
+
 async function runGeminiStripMerge(strips: string[], apiKey: string): Promise<LabelFields | null> {
   const modes: Array<"job" | "fabric" | "size"> = ["job", "fabric", "size"];
   const results = await Promise.all(
-    strips.map((strip, index) => runGeminiStructured(strip, apiKey, modes[index] ?? "full"))
+    strips.map((strip, index) =>
+      runGeminiStructured(strip, apiKey, modes[index] ?? "full", GEMINI_MODELS[0]!)
+    )
   );
 
   const merged: LabelFields = { job: "", fabric: "", size: "" };
@@ -327,7 +430,6 @@ async function runAllProviders(
   images: string[],
   stripsBase64: string[],
   visionKey?: string,
-  geminiKey?: string,
   ocrSpaceKey?: string
 ): Promise<{ best: OcrAttempt; candidates: ScoredCandidate[] }> {
   const tasks: Promise<OcrAttempt>[] = [];
@@ -335,15 +437,6 @@ async function runAllProviders(
   for (const img of images) {
     if (visionKey) {
       tasks.push(runGoogleVision(img, visionKey).then((r) => ({ ...r, provider: "google" })));
-    }
-    if (geminiKey) {
-      tasks.push(
-        runGeminiStructured(img, geminiKey, "full").then((fields) => ({
-          text: fields ? fieldsToText(fields) : null,
-          fields,
-          provider: "gemini",
-        }))
-      );
     }
     if (ocrSpaceKey && img.length <= 1_350_000) {
       tasks.push(
@@ -377,19 +470,26 @@ async function runAllProviders(
       best.detail = result.detail;
     }
     if (result.fields && scoreFields(result.fields) > scoreFields(best.fields ?? null)) {
-      best = result;
+      best = { ...result, text: result.text ?? fieldsToText(result.fields) };
+      continue;
     }
     if (!result.text) continue;
 
     const normalized = result.text.trim();
     if (!normalized || seen.has(normalized)) continue;
-    seen.add(normalized);
+    const parsed = parseTextFields(normalized);
+    if (parsed && scoreFields(parsed) > scoreFields(best.fields ?? null)) {
+      best = { text: normalized, fields: parsed, provider: result.provider };
+    }
 
+    seen.add(normalized);
     const score = scoreText(normalized);
     scored.push({ text: normalized, provider: result.provider, score });
 
     const bestScore = best.text ? scoreText(best.text) : 0;
-    if (score > bestScore) best = result;
+    if (score > bestScore && scoreFields(parseTextFields(normalized)) >= scoreFields(best.fields ?? null)) {
+      best = result;
+    }
   }
 
   scored.sort((a, b) => b.score - a.score);
