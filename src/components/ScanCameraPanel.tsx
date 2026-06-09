@@ -21,6 +21,7 @@ type Props = {
   onLabelFields?: (fields: LabelOcrFields) => void;
   onLabelScan?: (outcome: LabelScanOutcome) => void;
   onCameraError?: (message: string | null) => void;
+  onScanStart?: () => void;
 };
 
 function triggerCaptureFeedback(setFlash: (on: boolean) => void): void {
@@ -36,6 +37,7 @@ export function ScanCameraPanel({
   onLabelFields,
   onLabelScan,
   onCameraError,
+  onScanStart,
 }: Props) {
   const videoRef = useRef<HTMLVideoElement>(null);
   const scanGenRef = useRef(0);
@@ -89,6 +91,7 @@ export function ScanCameraPanel({
 
     triggerCaptureFeedback(setFlash);
     const scanGen = ++scanGenRef.current;
+    if (mode === "label") onScanStart?.();
     setBusy(true);
     setReadPhase(null);
     const hardCap = window.setTimeout(() => {

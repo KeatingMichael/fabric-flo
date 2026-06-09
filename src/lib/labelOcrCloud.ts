@@ -1,5 +1,6 @@
 import {
   prepareLabelScanCanvas,
+  scaleCanvas,
   shrinkJpegForCloud,
 } from "@/lib/labelOcrImage";
 import {
@@ -12,7 +13,7 @@ import {
 } from "@/lib/labelOcr";
 import {
   hasAnyLabelField,
-  readLabelBlockFast,
+  readLabelOnPhone,
   stripBase64Payload,
 } from "@/lib/labelOcrQuick";
 import { FunctionsHttpError, getSupabase } from "@/lib/supabase";
@@ -27,6 +28,7 @@ type LabelOcrResponse = {
 
 type LabelOcrRequest = {
   imageBase64: string;
+  altImageBase64?: string;
   stripsBase64?: string[];
 };
 
@@ -128,10 +130,12 @@ function prepareCloudRequest(
   source: HTMLCanvasElement,
   _jpegDataUrl?: string
 ): LabelOcrRequest {
-  const scaled = prepareLabelScanCanvas(source, SCAN_CLOUD_MAX_EDGE);
-  const stripsBase64 = stripBase64Payload(scaled);
-  const imageBase64 = shrinkJpegForCloud(scaled).replace(/^data:image\/\w+;base64,/, "");
-  return { imageBase64, stripsBase64 };
+  const white = prepareLabelScanCanvas(source, SCAN_CLOUD_MAX_EDGE);
+  const raw = scaleCanvas(source, SCAN_CLOUD_MAX_EDGE);
+  const stripsBase64 = stripBase64Payload(white);
+  const imageBase64 = shrinkJpegForCloud(white).replace(/^data:image\/\w+;base64,/, "");
+  const altImageBase64 = shrinkJpegForCloud(raw).replace(/^data:image\/\w+;base64,/, "");
+  return { imageBase64, altImageBase64, stripsBase64 };
 }
 
 /** Cloud OCR with on-phone block read fallback when cloud misses. */
@@ -148,7 +152,7 @@ export async function scanLabelFromCapture(
   if (!hasAnyLabelField(outcome.fields)) {
     onPhase?.("phone");
     const phoneFields = await withTimeout(
-      readLabelBlockFast(prepareLabelScanCanvas(source, 2200)),
+      readLabelOnPhone(prepareLabelScanCanvas(source, 2200)),
       PHONE_OCR_TIMEOUT_MS,
       EMPTY_FIELDS
     );
@@ -250,7 +254,13 @@ export function labelScanStatusMessage(status: LabelOcrCloudStatus, detail?: str
     case "error":
       return "Couldn’t read — tap Scan again or fix fields below.";
     case "no_text":
-      return "Couldn’t read the sticker — hold the white label in frame and Scan again.";
+      if (detail === "google_billing") {
+        return "Enable Google Cloud billing for Vision, or type the three lines below.";
+      }
+      if (detail === "google_api_disabled") {
+        return "Enable Cloud Vision API in Google Cloud, or type the three lines below.";
+      }
+      return "No text detected — type the three lines below, or Scan again in brighter light.";
     case "partial":
       return "Got some lines — fix any field below, then Add to Log.";
     case "success":

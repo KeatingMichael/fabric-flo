@@ -313,6 +313,7 @@ export function ScanPage() {
       <ScanCameraPanel
         mode={mode}
         onQrDecoded={onQrDecoded}
+        onScanStart={clearLabelFields}
         onLabelFields={(fields) => {
           setLabelJob(fields.job);
           setLabelFabric(fields.fabric);

@@ -115,7 +115,7 @@ export function cropToWhiteLabel(source: HTMLCanvasElement): HTMLCanvasElement {
     const r = data[i]!;
     const g = data[i + 1]!;
     const b = data[i + 2]!;
-    return r > 158 && g > 158 && b > 148 && r + g + b > 480;
+    return r > 145 && g > 145 && b > 135 && r + g + b > 430;
   };
 
   let minX = width;
@@ -360,7 +360,7 @@ export function rentalLabelStrips(source: HTMLCanvasElement): [HTMLCanvasElement
 
 /** Keep cloud OCR images under OCR.space free-tier size limit (~1 MB). */
 export function shrinkJpegForCloud(canvas: HTMLCanvasElement, preferred?: string): string {
-  const maxBase64 = 1_300_000;
+  const maxBase64 = 900_000;
   const tryUrls = preferred ? [preferred] : [];
   for (const q of [0.92, 0.85, 0.75, 0.65, 0.55]) {
     tryUrls.push(canvas.toDataURL("image/jpeg", q));
