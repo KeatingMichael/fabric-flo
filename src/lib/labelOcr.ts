@@ -47,6 +47,9 @@ const SOLID_ALIASES = new Set([
   "5OLID",
   "SOL1D",
   "SOLID",
+  "SLD",
+  "SLID",
+  "SOLO",
 ]);
 
 const FABRIC_KEYWORDS = [
@@ -302,7 +305,7 @@ function lettersToJobDigits(line: string): string | null {
 }
 
 function repairJobLine(line: string): string {
-  const trimmed = normalizeLine(line);
+  const trimmed = normalizeLine(line).replace(/[Oo]/g, "0").replace(/[Il|]/g, "1");
   const digits = trimmed.replace(/\D/g, "");
   if (digits.length >= 4 && digits.length <= 8) return digits;
   const fromLetters = lettersToJobDigits(trimmed);
@@ -324,7 +327,7 @@ function repairFabricLine(line: string): string {
   if (normalized.includes(" ") && normalized.length >= 5) return normalized;
   const compact = normalized.replace(/[^A-Z]/g, "");
   if (SOLID_ALIASES.has(compact)) return "SOLID";
-  if (/^O+L+$|^SO?L+$|^SOU?D$|^S0LID$|^OB$|^OOB$/i.test(compact)) return "SOLID";
+  if (/^O+L+$|^SO?L+$|^SOU?D$|^S0LID$|^SLD$|^SLID$|^SOLO$|^OB$|^OOB$/i.test(compact)) return "SOLID";
   const keyword = extractFabricKeyword(normalized);
   if (keyword && levenshtein(compact, keyword) <= 1) return keyword;
   return normalized;
@@ -656,6 +659,18 @@ function scoreSizeCandidate(size: string): number {
 }
 
 function pickBestJobFromCandidates(candidates: string[], rawContext: string): string {
+  const contextLines = rawContext
+    .split(/\n/)
+    .map((line) => normalizeLine(line))
+    .filter(Boolean);
+  for (const line of contextLines) {
+    const repaired = repairJobLine(line);
+    const digits = repaired.replace(/\D/g, "");
+    if (isPlausibleJobDigits(digits) && /^[\dOoIl|\s]{4,10}$/.test(line.replace(/\s/g, ""))) {
+      return digits;
+    }
+  }
+
   const digitRuns: string[] = [];
   for (const candidate of candidates) {
     const digits = candidate.replace(/\D/g, "");
@@ -1032,7 +1047,7 @@ export async function recognizeLabelFieldsLocalHeavy(canvas: HTMLCanvasElement):
   }
 }
 
-function scoreParsedLabelFields(fields: LabelOcrFields): number {
+export function scoreParsedLabelFields(fields: LabelOcrFields): number {
   let score = 0;
   const jobDigits = fields.job.replace(/\D/g, "");
   if (isPlausibleJobDigits(jobDigits)) score += 50;
@@ -1043,11 +1058,14 @@ function scoreParsedLabelFields(fields: LabelOcrFields): number {
     score += 30;
     if (fabric.includes(" ")) score += 18;
     if (extractFabricPhrase(fabric)) score += 12;
+  } else if (/^\d+$/.test(fabric)) {
+    score -= 90;
   }
 
   const sizeDim = extractDimensions(fields.size);
   if (sizeDim) score += 40;
   else if (fields.size.trim()) score -= 45;
+  if (/^\d+$/.test(fields.size.trim()) && !sizeDim) score -= 90;
   if (fields.size.includes("/")) score -= 50;
 
   return score;
@@ -1107,7 +1125,69 @@ export function parseRawTextToLabelFields(rawText: string): LabelOcrFields {
   }
 
   candidates.sort((a, b) => scoreParsedLabelFields(b) - scoreParsedLabelFields(a));
-  return candidates[0] ?? { job: "", fabric: "", size: "" };
+  return polishLabelFields(rawText, candidates[0] ?? { job: "", fabric: "", size: "" });
+}
+
+function pickStrongerField(
+  current: string,
+  fallback: string,
+  isStrong: (value: string) => boolean
+): string {
+  const a = current.trim();
+  const b = fallback.trim();
+  if (isStrong(b) && !isStrong(a)) return b;
+  if (isStrong(a) && !isStrong(b)) return a;
+  return b.length > a.length ? b : a;
+}
+
+/** Fix common OCR confusions (O→0, SLD→SOLID) using full raw text as context. */
+export function polishLabelFields(rawText: string, fields: LabelOcrFields): LabelOcrFields {
+  const fromRaw = extractAllFieldsFromText(rawText);
+
+  const job = pickStrongerField(
+    fields.job ? repairJobLine(fields.job) : "",
+    fromRaw.job,
+    (v) => !looksLikeWeakJobLine(v)
+  );
+
+  let fabric = fields.fabric ? repairFabricLine(fields.fabric) : "";
+  if (looksLikeWeakFabricLine(fabric) || /^\d+$/.test(fabric.trim())) {
+    fabric = fromRaw.fabric || repairFabricLine(fabric);
+  }
+  const phrase = extractFabricPhrase(rawText);
+  if (phrase && looksLikeWeakFabricLine(fabric)) fabric = phrase;
+
+  let size = fields.size ? repairSizeLineStrict(fields.size.replace(/[Oo]/g, "0")) : "";
+  if (looksLikeWeakSizeLine(size) || /^\d+$/.test(size.trim())) {
+    size = fromRaw.size || size;
+  }
+
+  return { job, fabric, size };
+}
+
+/** Pick the best parsed fields from one or more raw OCR texts. */
+export function pickBestFieldsFromOcrTexts(texts: string[]): LabelOcrFields {
+  let best: LabelOcrFields = { job: "", fabric: "", size: "" };
+  let bestScore = -Infinity;
+  const seen = new Set<string>();
+
+  for (const raw of texts) {
+    const trimmed = raw.trim();
+    if (!trimmed || seen.has(trimmed)) continue;
+    seen.add(trimmed);
+
+    const parsed = parseRawTextToLabelFields(trimmed);
+    const polished = polishLabelFields(trimmed, parsed);
+    if (!polished.job && !polished.fabric && !polished.size) continue;
+
+    const score = scoreParsedLabelFields(polished);
+    if (score > bestScore) {
+      bestScore = score;
+      best = polished;
+    }
+  }
+
+  return best;
 }
 
 /** True when line 1 probably still needs a human fix. */

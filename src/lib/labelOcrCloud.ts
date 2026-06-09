@@ -1,14 +1,14 @@
 import {
   prepareLabelScanCanvas,
-  scaleCanvas,
+  prepareLabelScanVariants,
   shrinkJpegForCloud,
 } from "@/lib/labelOcrImage";
 import {
   looksLikeWeakFabricLine,
   looksLikeWeakJobLine,
   looksLikeWeakSizeLine,
-  parseRawTextToLabelFields,
-  splitLabelIntoFields,
+  pickBestFieldsFromOcrTexts,
+  scoreParsedLabelFields,
   type LabelOcrFields,
 } from "@/lib/labelOcr";
 import {
@@ -18,17 +18,21 @@ import {
 } from "@/lib/labelOcrQuick";
 import { FunctionsHttpError, getSupabase } from "@/lib/supabase";
 
+type OcrCandidate = { text?: string; provider?: string };
+
 type LabelOcrResponse = {
   text?: string;
   error?: string;
   rawText?: string;
   provider?: string;
   detail?: string;
+  candidates?: OcrCandidate[];
 };
 
 type LabelOcrRequest = {
   imageBase64: string;
   altImageBase64?: string;
+  extraImagesBase64?: string[];
   stripsBase64?: string[];
 };
 
@@ -51,9 +55,9 @@ export type LabelScanOutcome = LabelOcrCloudOutcome & { message: string };
 
 export type ScanReadPhase = "cloud" | "phone";
 
-const CLOUD_OCR_TIMEOUT_MS = 18_000;
+const CLOUD_OCR_TIMEOUT_MS = 22_000;
 const PHONE_OCR_TIMEOUT_MS = 12_000;
-const SCAN_CLOUD_MAX_EDGE = 2000;
+const SCAN_CLOUD_MAX_EDGE = 2400;
 const EMPTY_FIELDS: LabelOcrFields = { job: "", fabric: "", size: "" };
 
 function withTimeout<T>(promise: Promise<T>, ms: number, fallback: T): Promise<T> {
@@ -101,15 +105,22 @@ async function readInvokePayload(
   return data ?? null;
 }
 
+function collectOcrTexts(payload: LabelOcrResponse | null): string[] {
+  if (!payload) return [];
+  const texts: string[] = [];
+  for (const candidate of payload.candidates ?? []) {
+    const t = candidate.text?.trim();
+    if (t) texts.push(t);
+  }
+  const primary = payload.text?.trim() || payload.rawText?.trim();
+  if (primary) texts.unshift(primary);
+  return texts;
+}
+
 function fieldsFromPayload(payload: LabelOcrResponse | null): LabelOcrFields {
-  if (!payload) return EMPTY_FIELDS;
-  const raw = payload.text?.trim() || payload.rawText?.trim() || "";
-  if (!raw) return EMPTY_FIELDS;
-  const parsed = parseRawTextToLabelFields(raw);
-  if (hasAnyLabelField(parsed)) return parsed;
-  const split = splitLabelIntoFields(raw.replace(/\n/g, " / "));
-  if (hasAnyLabelField(split)) return split;
-  return parsed;
+  const texts = collectOcrTexts(payload);
+  if (!texts.length) return EMPTY_FIELDS;
+  return pickBestFieldsFromOcrTexts(texts);
 }
 
 function outcomeFromPayload(payload: LabelOcrResponse | null): LabelOcrCloudOutcome {
@@ -126,19 +137,28 @@ function outcomeFromPayload(payload: LabelOcrResponse | null): LabelOcrCloudOutc
   return { fields, status: scoreFields(fields), detail: payload.detail };
 }
 
+function toBase64(canvas: HTMLCanvasElement): string {
+  return shrinkJpegForCloud(canvas).replace(/^data:image\/\w+;base64,/, "");
+}
+
 function prepareCloudRequest(
   source: HTMLCanvasElement,
   _jpegDataUrl?: string
 ): LabelOcrRequest {
-  const white = prepareLabelScanCanvas(source, SCAN_CLOUD_MAX_EDGE);
-  const raw = scaleCanvas(source, SCAN_CLOUD_MAX_EDGE);
-  const stripsBase64 = stripBase64Payload(white);
-  const imageBase64 = shrinkJpegForCloud(white).replace(/^data:image\/\w+;base64,/, "");
-  const altImageBase64 = shrinkJpegForCloud(raw).replace(/^data:image\/\w+;base64,/, "");
-  return { imageBase64, altImageBase64, stripsBase64 };
+  const { natural, binarized, rotated } = prepareLabelScanVariants(source, SCAN_CLOUD_MAX_EDGE);
+  return {
+    imageBase64: toBase64(natural),
+    altImageBase64: toBase64(binarized),
+    extraImagesBase64: [toBase64(rotated)],
+    stripsBase64: stripBase64Payload(natural),
+  };
 }
 
-/** Cloud OCR with on-phone block read fallback when cloud misses. */
+function pickBetterFields(a: LabelOcrFields, b: LabelOcrFields): LabelOcrFields {
+  return scoreParsedLabelFields(b) > scoreParsedLabelFields(a) ? b : a;
+}
+
+/** Cloud OCR with on-phone block read fallback when cloud misses or is weak. */
 export async function scanLabelFromCapture(
   source: HTMLCanvasElement,
   jpegDataUrl?: string,
@@ -149,15 +169,23 @@ export async function scanLabelFromCapture(
   onPhase?.("cloud");
   let outcome = await recognizeLabelFieldsCloudWithStatus(request);
 
-  if (!hasAnyLabelField(outcome.fields)) {
+  const cloudWeak =
+    !hasAnyLabelField(outcome.fields) ||
+    outcome.status === "partial" ||
+    outcome.status === "timeout" ||
+    outcome.status === "error";
+
+  if (cloudWeak) {
     onPhase?.("phone");
-    const phoneFields = await withTimeout(
-      readLabelOnPhone(prepareLabelScanCanvas(source, 2200)),
-      PHONE_OCR_TIMEOUT_MS,
-      EMPTY_FIELDS
-    );
+    const phoneCanvas = prepareLabelScanCanvas(source, 2200);
+    const phoneFields = await withTimeout(readLabelOnPhone(phoneCanvas), PHONE_OCR_TIMEOUT_MS, EMPTY_FIELDS);
     if (hasAnyLabelField(phoneFields)) {
-      outcome = { fields: phoneFields, status: scoreFields(phoneFields), detail: outcome.detail };
+      const merged = pickBetterFields(outcome.fields, phoneFields);
+      outcome = {
+        fields: merged,
+        status: scoreFields(merged),
+        detail: outcome.detail,
+      };
     }
   }
 
@@ -173,7 +201,10 @@ export async function recognizeLabelFieldsCloudWithStatus(
   if (!navigator.onLine) {
     return { fields: EMPTY_FIELDS, status: "offline" };
   }
-  const payload = typeof request === "string" ? { imageBase64: request.replace(/^data:image\/\w+;base64,/, "") } : request;
+  const payload =
+    typeof request === "string"
+      ? { imageBase64: request.replace(/^data:image\/\w+;base64,/, "") }
+      : request;
   return withTimeout(recognizeLabelFieldsCloudInner(payload), CLOUD_OCR_TIMEOUT_MS, {
     fields: EMPTY_FIELDS,
     status: "timeout",

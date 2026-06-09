@@ -152,10 +152,60 @@ export function cropToWhiteLabel(source: HTMLCanvasElement): HTMLCanvasElement {
   return out;
 }
 
-/** Guide crop → white label crop → scale for cloud OCR. */
+/** White-label crop scaled to target size (no tone filter). */
+export function scaleWhiteLabel(source: HTMLCanvasElement, targetLongEdge: number): HTMLCanvasElement {
+  return scaleCanvas(cropToWhiteLabel(source), targetLongEdge);
+}
+
+/** Guide crop → white label crop → contrast → scale for cloud OCR. */
 export function prepareLabelScanCanvas(source: HTMLCanvasElement, targetLongEdge: number): HTMLCanvasElement {
-  const label = cropToWhiteLabel(source);
-  return scaleCanvas(label, targetLongEdge);
+  return preprocessLabelContrast(scaleWhiteLabel(source, targetLongEdge));
+}
+
+/** Contrast, binarized, and 90° variants — OCR providers disagree on which reads best. */
+export function prepareLabelScanVariants(
+  source: HTMLCanvasElement,
+  targetLongEdge: number
+): { natural: HTMLCanvasElement; binarized: HTMLCanvasElement; rotated: HTMLCanvasElement } {
+  const scaled = scaleWhiteLabel(source, targetLongEdge);
+  return {
+    natural: preprocessLabelContrast(scaled),
+    binarized: preprocessLabelBinarize(scaled),
+    rotated: preprocessLabelContrast(rotateCanvas(scaled, 90)),
+  };
+}
+
+/** Rotate canvas 90°, 180°, or 270° clockwise (white fill). */
+export function rotateCanvas(source: HTMLCanvasElement, degrees: 90 | 180 | 270): HTMLCanvasElement {
+  const canvas = document.createElement("canvas");
+  if (degrees === 90 || degrees === 270) {
+    canvas.width = source.height;
+    canvas.height = source.width;
+  } else {
+    canvas.width = source.width;
+    canvas.height = source.height;
+  }
+  const ctx = canvas.getContext("2d");
+  if (!ctx) return source;
+  ctx.fillStyle = "#ffffff";
+  ctx.fillRect(0, 0, canvas.width, canvas.height);
+  if (degrees === 90) {
+    ctx.translate(canvas.width, 0);
+    ctx.rotate(Math.PI / 2);
+  } else if (degrees === 180) {
+    ctx.translate(canvas.width, canvas.height);
+    ctx.rotate(Math.PI);
+  } else {
+    ctx.translate(0, canvas.height);
+    ctx.rotate(-Math.PI / 2);
+  }
+  ctx.drawImage(source, 0, 0);
+  return canvas;
+}
+
+/** Natural orientation first; rotated copy only as an alternate OCR attempt. */
+export function labelOcrOrientations(source: HTMLCanvasElement): [HTMLCanvasElement, HTMLCanvasElement] {
+  return [source, rotateCanvas(source, 90)];
 }
 
 function cloneCanvas(source: HTMLCanvasElement): HTMLCanvasElement {

@@ -35,6 +35,7 @@ type OcrSpaceResponse = {
 type LabelOcrBody = {
   imageBase64?: string;
   altImageBase64?: string;
+  extraImagesBase64?: string[];
   stripsBase64?: string[];
 };
 
@@ -42,6 +43,12 @@ type OcrAttempt = {
   text: string | null;
   provider?: string;
   detail?: string;
+};
+
+type ScoredCandidate = {
+  text: string;
+  provider?: string;
+  score: number;
 };
 
 Deno.serve(async (req) => {
@@ -85,11 +92,13 @@ Deno.serve(async (req) => {
     }
 
     const altImageBase64 = body.altImageBase64?.trim();
+    const extraImages = body.extraImagesBase64?.filter((s) => s && s.length > 32) ?? [];
     const strips = body.stripsBase64?.filter((s) => s && s.length > 32) ?? [];
 
-    const best = await runAllProviders(
-      imageBase64,
-      altImageBase64,
+    const { best, candidates } = await runAllProviders(
+      [imageBase64, altImageBase64, ...extraImages].filter(
+        (img): img is string => Boolean(img && img.length > 32)
+      ),
       strips,
       visionKey,
       geminiKey,
@@ -101,6 +110,7 @@ Deno.serve(async (req) => {
         text: best.text,
         rawText: best.text,
         provider: best.provider ?? "unknown",
+        candidates: candidates.slice(0, 10).map(({ text, provider }) => ({ text, provider })),
       });
     }
 
@@ -109,6 +119,7 @@ Deno.serve(async (req) => {
       rawText: "",
       error: "no_text_detected",
       detail: best.detail ?? "ocr_miss",
+      candidates: [],
     });
   } catch (e) {
     return json({ text: "", error: e instanceof Error ? e.message : "unknown" }, 500);
@@ -116,16 +127,12 @@ Deno.serve(async (req) => {
 });
 
 async function runAllProviders(
-  imageBase64: string,
-  altImageBase64: string | undefined,
+  images: string[],
   stripsBase64: string[],
   visionKey?: string,
   geminiKey?: string,
   ocrSpaceKey?: string
-): Promise<OcrAttempt> {
-  const images = [imageBase64, altImageBase64].filter(
-    (img): img is string => Boolean(img && img.length > 32)
-  );
+): Promise<{ best: OcrAttempt; candidates: ScoredCandidate[] }> {
   const tasks: Promise<OcrAttempt>[] = [];
 
   for (const img of images) {
@@ -149,12 +156,14 @@ async function runAllProviders(
     for (const strip of stripsBase64.slice(0, 3)) {
       if (strip.length > 1_350_000) continue;
       tasks.push(
-        runOcrSpaceEngine(ocrSpaceKey, strip, "2").then((text) => ({ text, provider: "ocrspace" }))
+        runOcrSpaceEngine(ocrSpaceKey, strip, "2").then((text) => ({ text, provider: "ocrspace-strip" }))
       );
     }
   }
 
   const results = await Promise.all(tasks);
+  const scored: ScoredCandidate[] = [];
+  const seen = new Set<string>();
   let best: OcrAttempt = { text: null, detail: "ocr_miss" };
 
   for (const result of results) {
@@ -162,23 +171,47 @@ async function runAllProviders(
       best.detail = result.detail;
     }
     if (!result.text) continue;
-    const score = scoreText(result.text);
+
+    const normalized = result.text.trim();
+    if (!normalized || seen.has(normalized)) continue;
+    seen.add(normalized);
+
+    const score = scoreText(normalized);
+    scored.push({ text: normalized, provider: result.provider, score });
+
     const bestScore = best.text ? scoreText(best.text) : 0;
     if (score > bestScore) best = result;
   }
 
-  return best;
+  scored.sort((a, b) => b.score - a.score);
+  return { best, candidates: scored };
 }
 
 function scoreText(text: string): number {
   const lines = text
     .split(/\r?\n/)
     .map((l) => l.trim())
-    .filter((l) => l.length >= 2);
-  let score = lines.length * 10;
-  if (/\d{4,8}/.test(text)) score += 15;
-  if (/blue foam|solid|muslin|duvet|velvet|chroma|foam|bounce/i.test(text)) score += 10;
-  if (/\d+\s*['′]?\s*[xX×]\s*\d+/i.test(text)) score += 10;
+    .filter((l) => l.length >= 1);
+
+  let score = lines.length * 8;
+
+  if (lines.length >= 3) {
+    score += 25;
+    const jobDigits = lines[0]!.replace(/\D/g, "");
+    if (jobDigits.length >= 5 && jobDigits.length <= 7) score += 30;
+    if (/[A-Za-z]{4,}/.test(lines[1]!)) score += 25;
+    if (/\d+\s*['′]?\s*[xX×]\s*\d+/i.test(lines[2]!)) score += 30;
+  }
+
+  if (/\d{5,7}/.test(text)) score += 15;
+  if (/blue foam|solid|muslin|duvet|velvet|chroma|foam|bounce/i.test(text)) score += 20;
+  if (/\d+\s*['′]?\s*[xX×]\s*\d+/i.test(text)) score += 15;
+
+  for (const line of lines) {
+    if (/^\d$/.test(line)) score -= 40;
+    if (line.length === 2 && !/[xX]/.test(line)) score -= 15;
+  }
+
   return score;
 }
 
@@ -236,7 +269,7 @@ async function runGeminiLabelRead(imageBase64: string, apiKey: string): Promise<
               parts: [
                 {
                   text:
-                    "Read the white rental fabric label. Reply with exactly 3 lines: job number (digits), fabric name, size. Example:\n111023\nSOLID\n12' x 12'",
+                    "Read the white rental fabric label. Reply with exactly 3 lines: job number (digits only), fabric name, size. Example:\n236998\nBLUE FOAM\n40' x 60'",
                 },
                 { inline_data: { mime_type: "image/jpeg", data: imageBase64 } },
               ],
