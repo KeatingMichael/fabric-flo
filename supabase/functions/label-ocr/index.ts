@@ -34,6 +34,7 @@ type LabelOcrBody = {
   altImageBase64?: string;
   extraImagesBase64?: string[];
   stripsBase64?: string[];
+  mode?: "fast" | "full";
 };
 
 type LabelFields = {
@@ -113,6 +114,7 @@ Deno.serve(async (req) => {
     const altImageBase64 = body.altImageBase64?.trim();
     const extraImages = body.extraImagesBase64?.filter((s) => s && s.length > 32) ?? [];
     const strips = body.stripsBase64?.filter((s) => s && s.length > 32) ?? [];
+    const mode = body.mode === "full" ? "full" : "fast";
 
     const images = [imageBase64, altImageBase64, ...extraImages].filter(
       (img): img is string => Boolean(img && img.length > 32)
@@ -128,23 +130,6 @@ Deno.serve(async (req) => {
       if (quick && hasAnyField(quick)) {
         structuredFields = normalizeStructuredFields(quick);
         structuredProvider = `gemini:${GEMINI_MODELS[0]}`;
-        if (scoreFields(structuredFields) >= 15) {
-          const text = fieldsToText(structuredFields);
-          return json({
-            text,
-            rawText: text,
-            fields: structuredFields,
-            provider: structuredProvider,
-            candidates: [{ text, provider: structuredProvider }],
-          });
-        }
-      }
-
-      const geminiBest = await runGeminiBest(geminiKey, images, strips);
-      if (geminiBest.fields && hasAnyField(geminiBest.fields)) {
-        structuredFields = pickBestFields(structuredFields, geminiBest.fields) ?? geminiBest.fields;
-        structuredProvider = geminiBest.provider;
-        geminiDetail = geminiBest.detail;
       }
 
       if (!structuredFields || !hasAnyField(structuredFields)) {
@@ -154,9 +139,28 @@ Deno.serve(async (req) => {
           structuredProvider = `gemini-plain:${GEMINI_MODELS[0]}`;
         }
       }
+
+      if (mode === "full") {
+        if (!structuredFields || scoreFields(structuredFields ?? EMPTY_FIELDS) < 40) {
+          const geminiBest = await runGeminiBest(geminiKey, images, strips);
+          if (geminiBest.fields && hasAnyField(geminiBest.fields)) {
+            structuredFields = pickBestFields(structuredFields, geminiBest.fields) ?? geminiBest.fields;
+            structuredProvider = geminiBest.provider;
+            geminiDetail = geminiBest.detail;
+          }
+        }
+
+        if ((!structuredFields || !hasAnyField(structuredFields)) && strips.length >= 3) {
+          const stripFields = await runGeminiStripMerge(strips.slice(0, 3), geminiKey);
+          if (stripFields && hasAnyField(stripFields)) {
+            structuredFields = pickBestFields(structuredFields, stripFields) ?? stripFields;
+            structuredProvider = "gemini-strips";
+          }
+        }
+      }
     }
 
-  if (structuredFields && hasAnyField(structuredFields) && scoreFields(structuredFields) >= 15) {
+    if (structuredFields && hasAnyField(structuredFields)) {
       const text = fieldsToText(structuredFields);
       return json({
         text,
@@ -168,7 +172,17 @@ Deno.serve(async (req) => {
       });
     }
 
-    // Fallback: Vision + OCR.space on primary image only (fast)
+    if (mode === "fast") {
+      return json({
+        text: "",
+        rawText: "",
+        error: "no_text_detected",
+        detail: geminiKey ? "ocr_miss" : "gemini_not_configured",
+        candidates: [],
+      });
+    }
+
+    // Full mode: Vision + OCR.space on primary image only
     const { best, candidates } = await runAllProviders(
       images.slice(0, 1),
       strips.slice(0, 3),
@@ -434,7 +448,7 @@ async function runGeminiStructured(
 ): Promise<LabelFields | null> {
   const prompts: Record<typeof mode, string> = {
     full:
-      "Read the white rental fabric label with exactly 3 handwritten lines: (1) job number digits like 111023 or 236998, (2) fabric name like SOLID or BLUE FOAM, (3) size like 12' x 12' or 40' x 60'. Return JSON only.",
+      "Read the white rental fabric label with exactly 3 handwritten lines: (1) job number digits like 111023 or 236998 (vertical strokes may be 1s), (2) fabric name like SOLID or BLUE FOAM, (3) size like 12' x 12' or 40' x 60'. Text may be sideways — read all lines. Return JSON only.",
     job: "This image is ONLY the top line of a rental label — the job number. Return JSON with job (digits only), fabric empty string, size empty string.",
     fabric:
       "This image is ONLY the middle line of a rental label — the fabric name. Return JSON with job empty, fabric name uppercase, size empty.",
