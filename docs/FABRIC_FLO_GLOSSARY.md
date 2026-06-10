@@ -51,9 +51,19 @@ flowchart LR
   create --> invite["Create Invite Code"]
   invite --> share["Share by email or text"]
   share --> join["Crew enters Invite Code"]
-  join --> scan["Crew scans piece -> picks place"]
+  join --> scan["Crew logs a piece (label → place → log)"]
   scan --> log["Lands in shared log + rental inventory"]
 ```
+
+## Crew log flow (Scan tab)
+
+Phone-first, Duolingo-style steps — optimized for typing rental labels on set:
+
+1. **Label** — type job #, fabric, and size (camera read is optional).
+2. **Place** — pick or add where the piece is going.
+3. **Add to Log** — one green button; success shows a brief celebration, then the next piece.
+
+Dynamic QR remains available via a secondary link on the label step.
 
 This matches the smoke test in [`docs/BACKEND_SETUP.md`](BACKEND_SETUP.md): sign in, create production,
 create Invite Code, second user accepts, scan, and the entry appears on both logs when online.

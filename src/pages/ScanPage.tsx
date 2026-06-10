@@ -2,9 +2,16 @@ import { useEffect, useMemo, useRef, useState } from "react";
 import { Link, useLocation, useNavigate } from "react-router-dom";
 import { RecentLocationChips } from "@/components/RecentLocationChips";
 import { ScanCameraPanel } from "@/components/ScanCameraPanel";
+import { ScanFlowProgress } from "@/components/ScanFlowProgress";
 import { useActiveProduction, useApp } from "@/context/AppStore";
 import { hapticSuccess } from "@/lib/haptics";
-import { joinLabelFields, looksLikeWeakFabricLine, looksLikeWeakJobLine, looksLikeWeakSizeLine, polishLabelFields } from "@/lib/labelOcr";
+import {
+  joinLabelFields,
+  looksLikeWeakFabricLine,
+  looksLikeWeakJobLine,
+  looksLikeWeakSizeLine,
+  polishLabelFields,
+} from "@/lib/labelOcr";
 import type { LabelScanOutcome } from "@/lib/labelOcrCloud";
 import { validateLabelFieldsAgainstInventory } from "@/lib/labelInventoryValidate";
 import {
@@ -18,6 +25,7 @@ import type { LocationKind, ScanMethod } from "@/types";
 import { LOCATION_KIND_LABEL, LOCATION_KIND_ORDER } from "@/types";
 
 type ScanMode = "qr" | "label";
+type FlowStep = 1 | 2;
 
 const RENTAL_FABRIC_HINTS = [
   "SOLID",
@@ -54,7 +62,9 @@ export function ScanPage() {
   const quickLocNameRef = useRef<HTMLInputElement>(null);
   const focusFieldAfterScan = useRef<"job" | "fabric" | "size" | null>(null);
 
+  const [flowStep, setFlowStep] = useState<FlowStep>(1);
   const [mode, setMode] = useState<ScanMode>("label");
+  const [cameraOpen, setCameraOpen] = useState(false);
   const [cameraError, setCameraError] = useState<string | null>(null);
   const [hint, setHint] = useState<string | null>(null);
   const [manual, setManual] = useState("");
@@ -71,6 +81,7 @@ export function ScanPage() {
 
   const labelDraft = joinLabelFields(labelJob, labelFabric, labelSize);
   const scanText = (mode === "qr" ? manual : labelDraft).trim();
+  const labelReady = Boolean(labelJob.trim() && labelFabric.trim() && labelSize.trim());
 
   const isLocationLocked = Boolean(
     lockedLocationId &&
@@ -83,6 +94,8 @@ export function ScanPage() {
     () => (production ? getRecentLocationIds(production.id) : []),
     [production?.id]
   );
+
+  const progressStep = savedFlash ? 3 : flowStep;
 
   useEffect(() => {
     if (!production || production.locations.length === 0) return;
@@ -100,7 +113,10 @@ export function ScanPage() {
 
   useEffect(() => {
     if (!savedFlash) return;
-    const timer = window.setTimeout(() => setSavedFlash(null), 2600);
+    const timer = window.setTimeout(() => {
+      setSavedFlash(null);
+      setFlowStep(1);
+    }, 2600);
     return () => window.clearTimeout(timer);
   }, [savedFlash]);
 
@@ -138,22 +154,18 @@ export function ScanPage() {
   }
 
   function onScanStart() {
-    setHint("Reading label…");
+    setHint("Reading…");
   }
 
   function onLabelScan(outcome: LabelScanOutcome) {
     const hasFields = Boolean(outcome.fields.job || outcome.fields.fabric || outcome.fields.size);
 
     if (!hasFields || outcome.status === "no_text") {
-      setLabelJob("");
-      setLabelFabric("");
-      setLabelSize("");
-      setHint(outcome.message);
+      setHint("Type the three lines below — camera is optional.");
       return;
     }
 
     let fields = outcome.fields;
-    let status = outcome.status;
     let message = outcome.message;
 
     const polishRaw = joinLabelFields(fields.job, fields.fabric, fields.size);
@@ -169,35 +181,34 @@ export function ScanPage() {
       }
     }
 
+    setLabelJob(fields.job);
+    setLabelFabric(fields.fabric);
+    setLabelSize(fields.size);
+    setCameraOpen(false);
+
     const weakAfter =
       looksLikeWeakJobLine(fields.job) ||
       looksLikeWeakFabricLine(fields.fabric) ||
       looksLikeWeakSizeLine(fields.size);
-    status = weakAfter ? "partial" : "success";
-    if (weakAfter && !message.includes("inventory") && !message.includes("Matched")) {
-      message = "Got some lines — fix any field below, then Add to Log.";
-    } else if (!weakAfter && status === "success" && !message.includes("inventory")) {
-      message = "Label read — pick a place and Add to Log.";
-    }
 
-    setLabelJob(fields.job);
-    setLabelFabric(fields.fabric);
-    setLabelSize(fields.size);
-
-    if (production && production.locations.length === 0) {
-      setHint(
-        status === "success"
-          ? "Label read — add a place above, then Add to Log."
-          : "Fix any field below, add a place above, then Add to Log."
-      );
-      window.setTimeout(() => quickLocNameRef.current?.focus(), 120);
-    } else if (status === "partial") {
+    if (weakAfter) {
+      setHint("Fix any line, then tap Next.");
+    } else if (message.includes("inventory") || message.includes("Matched")) {
       setHint(message);
     } else {
-      setHint(message === outcome.message ? "Label read — pick a place and Add to Log." : message);
+      setHint("Looks good — tap Next.");
     }
 
-    if (looksLikeWeakJobLine(fields.job)) focusFieldAfterScan.current = "job";
+    if (
+      fields.job.trim() &&
+      fields.fabric.trim() &&
+      fields.size.trim() &&
+      !looksLikeWeakJobLine(fields.job) &&
+      !looksLikeWeakFabricLine(fields.fabric) &&
+      !looksLikeWeakSizeLine(fields.size)
+    ) {
+      setFlowStep(2);
+    } else if (looksLikeWeakJobLine(fields.job)) focusFieldAfterScan.current = "job";
     else if (looksLikeWeakFabricLine(fields.fabric)) focusFieldAfterScan.current = "fabric";
     else if (looksLikeWeakSizeLine(fields.size)) focusFieldAfterScan.current = "size";
     else if (!fields.job) focusFieldAfterScan.current = "job";
@@ -214,9 +225,18 @@ export function ScanPage() {
 
   function addToLog() {
     if (!production || !scanText) return;
-    const loc = production.locations.find((l) => l.id === locId);
+
+    let placeId = locId;
+    let loc = production.locations.find((l) => l.id === placeId);
+    if (!loc && quickLocName.trim()) {
+      placeId = addLocation(production.id, quickLocKind, quickLocName.trim());
+      rememberRecentLocation(production.id, placeId);
+      loc = { id: placeId, kind: quickLocKind, name: quickLocName.trim() };
+      setLocId(placeId);
+      setQuickLocName("");
+    }
     if (!loc) {
-      setHint(hasPlaces ? "Pick a place above." : "Add a place above first.");
+      setHint("Pick or add a place first.");
       focusPlacePicker();
       return;
     }
@@ -251,6 +271,7 @@ export function ScanPage() {
     setManual("");
     clearLabelFields();
     setLocationUnlocked(false);
+    setHint(null);
     navigate("/scan", {
       replace: true,
       state: { lockedLocationId: loc.id, lockedLocationLabel: loc.name },
@@ -259,8 +280,9 @@ export function ScanPage() {
 
   function onQrDecoded(text: string) {
     setManual(text.trim());
-    setHint("QR captured.");
+    setHint("QR captured — tap Add to Log.");
     setCameraError(null);
+    setFlowStep(2);
   }
 
   useEffect(() => {
@@ -279,10 +301,10 @@ export function ScanPage() {
 
   if (!production) {
     return (
-      <div className="page stack">
+      <div className="page stack scan-page">
         <h1>Log a piece</h1>
-        <p>Open a production first.</p>
-        <Link to="/app" className="btn btn-primary btn-block">
+        <p className="muted">Open a production first.</p>
+        <Link to="/app" className="btn btn-primary btn-block scan-cta scan-cta--ready">
           Sign in
         </Link>
       </div>
@@ -290,19 +312,65 @@ export function ScanPage() {
   }
 
   const hasPlaces = production.locations.length > 0;
-  const scanContentReady = Boolean(scanText);
   const statusLine = cameraError ?? hint;
+
+  if (mode === "qr") {
+    return (
+      <div className="page stack scan-page">
+        <ScanFlowProgress step={progressStep} />
+        <header className="scan-page__header">
+          <h1>Dynamic QR</h1>
+          <p className="scan-page__lead">Center the QR and tap Scan.</p>
+        </header>
+        <ScanCameraPanel
+          mode="qr"
+          onQrDecoded={onQrDecoded}
+          onScanStart={onScanStart}
+          autoCapture={false}
+          onCameraError={setCameraError}
+        />
+        {statusLine ? (
+          <p className={`scan-status scan-status--${cameraError ? "warn" : "ok"}`} role="status">
+            {statusLine}
+          </p>
+        ) : null}
+        <div className="field">
+          <label htmlFor="scan-qr-manual">Or paste QR value</label>
+          <textarea
+            id="scan-qr-manual"
+            className="textarea"
+            value={manual}
+            onChange={(e) => setManual(e.target.value)}
+            rows={2}
+          />
+        </div>
+        {renderPlaceSection()}
+        <button
+          type="button"
+          className={`btn btn-block scan-cta${scanText ? " scan-cta--ready" : ""}`}
+          disabled={!scanText}
+          onClick={addToLog}
+        >
+          Add to Log
+        </button>
+        <button
+          type="button"
+          className="scan-secondary-link"
+          onClick={() => {
+            setMode("label");
+            setManual("");
+            setFlowStep(1);
+          }}
+        >
+          ← Rental label instead
+        </button>
+      </div>
+    );
+  }
 
   return (
     <div className="page stack scan-page">
-      <header className="scan-page__header">
-        <h1>Scan</h1>
-        <p className="scan-page__lead">
-          {mode === "label"
-            ? "Fill the frame with the white sticker, tap Scan — job, fabric, and size fill in below."
-            : "Center the dynamic QR and tap Scan."}
-        </p>
-      </header>
+      <ScanFlowProgress step={progressStep} />
 
       {savedFlash ? (
         <div className="scan-celebrate" role="status">
@@ -318,97 +386,154 @@ export function ScanPage() {
         </div>
       ) : null}
 
-      <div className="scan-mode-tabs" role="tablist" aria-label="Scan type">
-        <button
-          type="button"
-          role="tab"
-          aria-selected={mode === "label" ? "true" : "false"}
-          className={`scan-mode-tabs__btn${mode === "label" ? " scan-mode-tabs__btn--active" : ""}`}
-          onClick={() => {
-            setCameraError(null);
-            setHint(null);
-            setMode("label");
-          }}
-        >
-          Rental label
-        </button>
-        <button
-          type="button"
-          role="tab"
-          aria-selected={mode === "qr" ? "true" : "false"}
-          className={`scan-mode-tabs__btn${mode === "qr" ? " scan-mode-tabs__btn--active" : ""}`}
-          onClick={() => {
-            setCameraError(null);
-            setHint(null);
-            setMode("qr");
-          }}
-        >
-          Dynamic QR
-        </button>
-      </div>
+      {flowStep === 1 ? renderLabelStep() : renderPlaceStep()}
 
-      <ScanCameraPanel
-        mode={mode}
-        onQrDecoded={onQrDecoded}
-        onScanStart={onScanStart}
-        autoCapture={false}
-        onLabelScan={onLabelScan}
-        onCameraError={setCameraError}
-      />
-
-      {statusLine ? (
-        <p className={`scan-status scan-status--${cameraError ? "warn" : "ok"}`} role="status">
-          {statusLine}
-        </p>
+      {flowStep === 1 ? (
+        <button type="button" className="scan-secondary-link" onClick={() => setMode("qr")}>
+          Dynamic QR instead
+        </button>
       ) : null}
+    </div>
+  );
 
-      <section className="card stack scan-sheet">
-        {renderPlacePicker()}
+  function renderLabelStep() {
+    return (
+      <>
+        <header className="scan-page__header">
+          <h1>What&apos;s on the sticker?</h1>
+          <p className="scan-page__lead">Type the three lines — camera is optional.</p>
+        </header>
 
-        {mode === "label" ? renderLabelFields() : renderQrField()}
+        <div className="scan-label-fields">
+          <div className="field">
+            <label htmlFor="label-job">Job #</label>
+            <input
+              ref={jobInputRef}
+              id="label-job"
+              className="input input--hero"
+              placeholder="111023"
+              value={labelJob}
+              onChange={(e) => setLabelJob(e.target.value)}
+              inputMode="numeric"
+              autoComplete="off"
+            />
+          </div>
+          <div className="field">
+            <label htmlFor="label-fabric">Fabric</label>
+            <input
+              id="label-fabric"
+              ref={fabricInputRef}
+              className="input input--hero"
+              placeholder="SOLID"
+              value={labelFabric}
+              onChange={(e) => setLabelFabric(e.target.value)}
+              list="label-fabric-hints"
+              autoComplete="off"
+              autoCapitalize="characters"
+            />
+            <datalist id="label-fabric-hints">
+              {RENTAL_FABRIC_HINTS.map((h) => (
+                <option key={h} value={h} />
+              ))}
+            </datalist>
+          </div>
+          <div className="field">
+            <label htmlFor="label-size">Size</label>
+            <input
+              id="label-size"
+              ref={sizeInputRef}
+              className="input input--hero"
+              placeholder={"12' x 12'"}
+              value={labelSize}
+              onChange={(e) => setLabelSize(e.target.value)}
+              autoComplete="off"
+            />
+          </div>
+        </div>
+
+        {!cameraOpen ? (
+          <button type="button" className="scan-rescan-link" onClick={() => setCameraOpen(true)}>
+            Try camera read (optional)
+          </button>
+        ) : (
+          <>
+            <ScanCameraPanel
+              mode="label"
+              onQrDecoded={() => {}}
+              onScanStart={onScanStart}
+              autoCapture={false}
+              onLabelScan={onLabelScan}
+              onCameraError={setCameraError}
+            />
+            <button type="button" className="scan-rescan-link" onClick={() => setCameraOpen(false)}>
+              Hide camera — type instead
+            </button>
+          </>
+        )}
+
+        {statusLine ? (
+          <p className={`scan-status scan-status--${cameraError ? "warn" : "neutral"}`} role="status">
+            {statusLine}
+          </p>
+        ) : null}
 
         <button
           type="button"
-          className={`btn btn-block scan-cta${scanContentReady ? " scan-cta--ready" : ""}`}
-          disabled={!scanContentReady}
+          className={`btn btn-block scan-cta${labelReady ? " scan-cta--ready" : ""}`}
+          disabled={!labelReady}
+          onClick={() => {
+            setHint(null);
+            setFlowStep(2);
+          }}
+        >
+          Next — pick a place
+        </button>
+      </>
+    );
+  }
+
+  function renderPlaceStep() {
+    return (
+      <>
+        <header className="scan-page__header">
+          <h1>Where is it going?</h1>
+          <p className="scan-page__lead scan-sheet__idle">
+            {labelJob} · {labelFabric} · {labelSize}
+          </p>
+        </header>
+
+        {renderPlaceSection()}
+
+        {statusLine ? (
+          <p className={`scan-status scan-status--${cameraError ? "warn" : "neutral"}`} role="status">
+            {statusLine}
+          </p>
+        ) : null}
+
+        <button
+          type="button"
+          className={`btn btn-block scan-cta${scanText && (hasPlaces ? locId : quickLocName.trim()) ? " scan-cta--ready" : ""}`}
+          disabled={!scanText}
           onClick={addToLog}
         >
           Add to Log
         </button>
 
-        {scanText ? (
-          <button
-            type="button"
-            className="scan-secondary-link"
-            onClick={() =>
-              goFabrics(mode === "qr" ? manual : labelDraft, mode === "qr" ? "qr" : "label")
-            }
-          >
-            Match in Fabrics instead
-          </button>
-        ) : null}
-      </section>
-
-      <Link to="/dashboard" className="scan-cancel muted">
-        Cancel
-      </Link>
-    </div>
-  );
-
-  function goFabrics(raw: string, scanMethod: ScanMethod) {
-    const t = raw.trim();
-    if (!t) return;
-    navigate("/inventory", {
-      state: {
-        raw: t,
-        scanMethod,
-        lockedLocationId,
-        lockedLocationLabel,
-      },
-    });
+        <button
+          type="button"
+          className="scan-secondary-link"
+          onClick={() => {
+            setFlowStep(1);
+            setHint(null);
+          }}
+        >
+          ← Edit label lines
+        </button>
+      </>
+    );
   }
 
-  function renderPlacePicker() {
+  function renderPlaceSection() {
     if (isLocationLocked) {
       return (
         <div className="scan-place-locked">
@@ -423,7 +548,7 @@ export function ScanPage() {
     if (!hasPlaces) {
       return (
         <div className="stack scan-place-setup">
-          <p className="muted scan-place-setup__note">Add a place first.</p>
+          <p className="muted scan-place-setup__note">Add your first place.</p>
           <div className="row scan-place-setup__row">
             <select
               id="scan-quick-loc-kind"
@@ -441,7 +566,7 @@ export function ScanPage() {
             <input
               id="scan-quick-loc-name"
               ref={quickLocNameRef}
-              className="input"
+              className="input input--hero"
               placeholder="Place name"
               value={quickLocName}
               onChange={(e) => setQuickLocName(e.target.value)}
@@ -466,11 +591,11 @@ export function ScanPage() {
           selectedId={locId}
           onPick={setLocId}
         />
-        <div className="field scan-field--compact">
+        <div className="field">
           <label htmlFor="scan-log-loc">Place</label>
           <select
             id="scan-log-loc"
-            className="select"
+            className="select input--hero"
             value={locId}
             onChange={(e) => setLocId(e.target.value)}
           >
@@ -491,74 +616,6 @@ export function ScanPage() {
           </select>
         </div>
       </>
-    );
-  }
-
-  function renderLabelFields() {
-    return (
-      <div className="scan-label-fields">
-        <p className="scan-field-hint muted">Filled by Scan — tap to fix</p>
-        <div className="field">
-          <label htmlFor="label-job">Job #</label>
-          <input
-            ref={jobInputRef}
-            id="label-job"
-            className="input input--hero"
-            placeholder="111023"
-            value={labelJob}
-            onChange={(e) => setLabelJob(e.target.value)}
-            inputMode="numeric"
-            autoComplete="off"
-          />
-        </div>
-        <div className="field">
-          <label htmlFor="label-fabric">Fabric</label>
-          <input
-            id="label-fabric"
-            ref={fabricInputRef}
-            className="input input--hero"
-            placeholder="SOLID"
-            value={labelFabric}
-            onChange={(e) => setLabelFabric(e.target.value)}
-            list="label-fabric-hints"
-            autoComplete="off"
-            autoCapitalize="characters"
-          />
-          <datalist id="label-fabric-hints">
-            {RENTAL_FABRIC_HINTS.map((h) => (
-              <option key={h} value={h} />
-            ))}
-          </datalist>
-        </div>
-        <div className="field">
-          <label htmlFor="label-size">Size</label>
-          <input
-            id="label-size"
-            ref={sizeInputRef}
-            className="input input--hero"
-            placeholder={"12' x 12'"}
-            value={labelSize}
-            onChange={(e) => setLabelSize(e.target.value)}
-            autoComplete="off"
-          />
-        </div>
-      </div>
-    );
-  }
-
-  function renderQrField() {
-    return (
-      <div className="field scan-field--compact">
-        <label htmlFor="scan-qr-manual">QR value</label>
-        <textarea
-          id="scan-qr-manual"
-          className="textarea"
-          placeholder="Paste if the camera did not read it"
-          value={manual}
-          onChange={(e) => setManual(e.target.value)}
-          rows={3}
-        />
-      </div>
     );
   }
 }
