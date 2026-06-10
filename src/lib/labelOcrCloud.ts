@@ -7,6 +7,7 @@ import {
   scaleWhiteLabel,
 } from "@/lib/labelOcrImage";
 import {
+  joinLabelFields,
   looksLikeWeakFabricLine,
   looksLikeWeakJobLine,
   looksLikeWeakSizeLine,
@@ -126,10 +127,11 @@ function collectOcrTexts(payload: LabelOcrResponse | null): string[] {
   return texts;
 }
 
-function sanitizeLabelFields(fields: LabelOcrFields): LabelOcrFields {
-  const job = fields.job.replace(/\D/g, "");
-  const fabric = fields.fabric.trim();
-  const size = fields.size.trim();
+function sanitizeLabelFields(fields: LabelOcrFields, rawText = ""): LabelOcrFields {
+  const polished = rawText ? polishLabelFields(rawText, fields) : fields;
+  const job = polished.job.replace(/\D/g, "");
+  const fabric = polished.fabric.trim();
+  const size = polished.size.trim();
   return {
     job: job.length >= 4 ? job : "",
     fabric: fabric.length >= 3 && !/^\d+$/.test(fabric) ? fabric : "",
@@ -141,7 +143,7 @@ function fieldsFromPayload(payload: LabelOcrResponse | null): LabelOcrFields {
   if (payload?.fields && hasAnyLabelField(payload.fields)) {
     const raw = payload.text?.trim() || payload.rawText?.trim() || collectOcrTexts(payload)[0] || "";
     const polished = polishLabelFields(raw, payload.fields);
-    const sanitized = sanitizeLabelFields(polished);
+    const sanitized = sanitizeLabelFields(polished, raw);
     if (hasAnyLabelField(sanitized)) return sanitized;
     return polished;
   }
@@ -159,6 +161,15 @@ function outcomeFromPayload(payload: LabelOcrResponse | null): LabelOcrCloudOutc
   }
   const fields = fieldsFromPayload(payload);
   if (!hasAnyLabelField(fields)) {
+    const fromCandidates = pickBestFieldsFromOcrTexts(collectOcrTexts(payload));
+    if (hasAnyLabelField(fromCandidates)) {
+      return {
+        fields: fromCandidates,
+        status: scoreFields(fromCandidates),
+        detail: payload.detail,
+        provider: payload.provider,
+      };
+    }
     return {
       fields: EMPTY_FIELDS,
       status: "no_text",
@@ -264,7 +275,8 @@ export async function scanLabelFromCapture(
 
   let outcome = cloudOutcome;
   if (nativeFields && hasAnyLabelField(nativeFields)) {
-    const merged = mergeIfBetter(outcome.fields, sanitizeLabelFields(nativeFields));
+    const rawContext = [nativeFields.job, nativeFields.fabric, nativeFields.size].filter(Boolean).join("\n");
+    const merged = mergeIfBetter(outcome.fields, sanitizeLabelFields(nativeFields, rawContext));
     outcome = {
       ...outcome,
       fields: merged,
@@ -278,7 +290,10 @@ export async function scanLabelFromCapture(
     const phoneRaw = scaleCanvas(source, 1600);
     const phoneFields = await withTimeout(readLabelOnPhone(phoneRaw), PHONE_OCR_TIMEOUT_MS, EMPTY_FIELDS);
     if (hasAnyLabelField(phoneFields)) {
-      const merged = mergeIfBetter(outcome.fields, sanitizeLabelFields(phoneFields));
+      const merged = mergeIfBetter(
+        outcome.fields,
+        sanitizeLabelFields(phoneFields, joinLabelFields(phoneFields.job, phoneFields.fabric, phoneFields.size))
+      );
       outcome = {
         fields: merged,
         status: scoreFields(merged),

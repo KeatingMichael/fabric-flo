@@ -1164,8 +1164,19 @@ export function polishLabelFields(rawText: string, fields: LabelOcrFields): Labe
   if (phrase && looksLikeWeakFabricLine(fabric)) fabric = phrase;
 
   let size = fields.size ? repairSizeLineStrict(fields.size.replace(/[Oo]/g, "0")) : "";
+  const contextBlob = [rawText, fields.job, fields.fabric, fields.size].filter(Boolean).join("\n");
+  const bestSize = pickBestSizeFromText(contextBlob);
+  if (bestSize) {
+    const currentScore = size ? scoreSizeCandidate(size) : 0;
+    const bestScore = scoreSizeCandidate(bestSize);
+    if (!size || looksLikeWeakSizeLine(size) || bestScore >= currentScore + 6) {
+      size = bestSize;
+    }
+  }
   if (looksLikeWeakSizeLine(size) || /^\d+$/.test(size.trim())) {
-    size = fromRaw.size || size;
+    size = fromRaw.size || repairSizeLine(fields.size, contextBlob);
+    const repaired = repairSizeLineStrict(size);
+    if (repaired) size = repaired;
   }
 
   return { job, fabric, size };

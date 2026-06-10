@@ -4,7 +4,7 @@ import { RecentLocationChips } from "@/components/RecentLocationChips";
 import { ScanCameraPanel } from "@/components/ScanCameraPanel";
 import { useActiveProduction, useApp } from "@/context/AppStore";
 import { hapticSuccess } from "@/lib/haptics";
-import { joinLabelFields, looksLikeWeakFabricLine, looksLikeWeakJobLine, looksLikeWeakSizeLine } from "@/lib/labelOcr";
+import { joinLabelFields, looksLikeWeakFabricLine, looksLikeWeakJobLine, looksLikeWeakSizeLine, polishLabelFields } from "@/lib/labelOcr";
 import type { LabelScanOutcome } from "@/lib/labelOcrCloud";
 import { validateLabelFieldsAgainstInventory } from "@/lib/labelInventoryValidate";
 import {
@@ -155,6 +155,9 @@ export function ScanPage() {
     let fields = outcome.fields;
     let status = outcome.status;
     let message = outcome.message;
+
+    const polishRaw = joinLabelFields(fields.job, fields.fabric, fields.size);
+    fields = polishLabelFields(polishRaw, fields);
 
     if (production) {
       const validated = validateLabelFieldsAgainstInventory(production, fields);
