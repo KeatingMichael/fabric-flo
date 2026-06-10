@@ -57,6 +57,15 @@ workflows:
         script: |
           cd ios/App
           pod install
+      - name: Initialize keychain
+        script: keychain initialize
+      - name: Fetch iOS code signing files
+        script: |
+          app-store-connect fetch-signing-files "app.fabricflo.tracker" \
+            --type IOS_APP_STORE \
+            --create
+      - name: Add certificates to keychain
+        script: keychain add-certificates
       - name: Set up code signing
         script: xcode-project use-profiles
       - name: Build the .ipa
