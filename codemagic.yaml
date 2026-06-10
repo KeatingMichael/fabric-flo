@@ -39,6 +39,11 @@ workflows:
       <<: *env_versions
       groups:
         - fabricflo_web
+      ios_signing:
+        provisioning_profiles:
+          - fabricflo_appstore
+        certificates:
+          - fabricflo_distribution
       vars:
         XCODE_WORKSPACE: "ios/App/App.xcworkspace"
         XCODE_SCHEME: "App"
@@ -56,11 +61,6 @@ workflows:
           pod install
       - name: Initialize keychain
         script: keychain initialize
-      - name: Fetch iOS code signing files
-        script: |
-          app-store-connect fetch-signing-files "app.fabricflo.tracker" \
-            --type IOS_APP_STORE \
-            --create
       - name: Add certificates to keychain
         script: keychain add-certificates
       - name: Set up code signing
