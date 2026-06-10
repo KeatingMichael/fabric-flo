@@ -123,27 +123,40 @@ Deno.serve(async (req) => {
     let geminiDetail: string | undefined;
 
     if (geminiKey) {
+      const primary = images[0]!;
+      const quick = await runGeminiStructured(primary, geminiKey, "full", GEMINI_MODELS[0]!);
+      if (quick && hasAnyField(quick)) {
+        structuredFields = normalizeStructuredFields(quick);
+        structuredProvider = `gemini:${GEMINI_MODELS[0]}`;
+        if (scoreFields(structuredFields) >= 15) {
+          const text = fieldsToText(structuredFields);
+          return json({
+            text,
+            rawText: text,
+            fields: structuredFields,
+            provider: structuredProvider,
+            candidates: [{ text, provider: structuredProvider }],
+          });
+        }
+      }
+
       const geminiBest = await runGeminiBest(geminiKey, images, strips);
-      structuredFields = geminiBest.fields;
-      structuredProvider = geminiBest.provider;
-      geminiDetail = geminiBest.detail;
+      if (geminiBest.fields && hasAnyField(geminiBest.fields)) {
+        structuredFields = pickBestFields(structuredFields, geminiBest.fields) ?? geminiBest.fields;
+        structuredProvider = geminiBest.provider;
+        geminiDetail = geminiBest.detail;
+      }
 
       if (!structuredFields || !hasAnyField(structuredFields)) {
-        for (const img of images.slice(0, 3)) {
-          for (const model of GEMINI_MODELS) {
-            const plain = await runGeminiPlainText(img, geminiKey, model);
-            if (plain && hasAnyField(plain)) {
-              structuredFields = normalizeStructuredFields(plain);
-              structuredProvider = `gemini-plain:${model}`;
-              break;
-            }
-          }
-          if (structuredFields && hasAnyField(structuredFields)) break;
+        const plain = await runGeminiPlainText(primary, geminiKey, GEMINI_MODELS[0]!);
+        if (plain && hasAnyField(plain)) {
+          structuredFields = normalizeStructuredFields(plain);
+          structuredProvider = `gemini-plain:${GEMINI_MODELS[0]}`;
         }
       }
     }
 
-    if (structuredFields && hasAnyField(structuredFields) && scoreFields(structuredFields) >= 15) {
+  if (structuredFields && hasAnyField(structuredFields) && scoreFields(structuredFields) >= 15) {
       const text = fieldsToText(structuredFields);
       return json({
         text,
@@ -251,29 +264,33 @@ async function runGeminiBest(
   const collected: LabelFields[] = [];
   let winnerModel = GEMINI_MODELS[0]!;
 
-  for (const img of images.slice(0, 3)) {
-    const primaryResults = await Promise.all(
-      GEMINI_MODELS.map((model) =>
-        runGeminiStructured(img, apiKey, "full", model).then((fields) => ({ fields, model }))
-      )
-    );
+  const primary = images[0]!;
+  const primaryResults = await Promise.all(
+    GEMINI_MODELS.map((model) =>
+      runGeminiStructured(primary, apiKey, "full", model).then((fields) => ({ fields, model }))
+    )
+  );
 
-    for (const result of primaryResults) {
-      if (result.fields && hasAnyField(result.fields)) {
-        collected.push(result.fields);
-        if (scoreFields(normalizeStructuredFields(result.fields)) >= 45) {
-          winnerModel = result.model;
-        }
+  for (const result of primaryResults) {
+    if (result.fields && hasAnyField(result.fields)) {
+      collected.push(result.fields);
+      if (scoreFields(normalizeStructuredFields(result.fields)) >= 45) {
+        winnerModel = result.model;
       }
     }
+  }
 
-    const mergedEarly = mergeBestGeminiFields(collected);
-    if (mergedEarly) {
-      const normalized = normalizeStructuredFields(mergedEarly);
-      if (scoreFields(normalized) >= 45) {
-        return { fields: normalized, provider: `gemini:${winnerModel}` };
-      }
+  let mergedEarly = mergeBestGeminiFields(collected);
+  if (mergedEarly) {
+    const normalized = normalizeStructuredFields(mergedEarly);
+    if (scoreFields(normalized) >= 45) {
+      return { fields: normalized, provider: `gemini:${winnerModel}` };
     }
+  }
+
+  for (const img of images.slice(1, 2)) {
+    const alt = await runGeminiStructured(img, apiKey, "full", GEMINI_MODELS[0]!);
+    if (alt && hasAnyField(alt)) collected.push(alt);
   }
 
   let merged = mergeBestGeminiFields(collected);

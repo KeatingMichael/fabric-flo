@@ -63,8 +63,8 @@ export type LabelScanOutcome = LabelOcrCloudOutcome & { message: string };
 
 export type ScanReadPhase = "native" | "cloud" | "phone";
 
-const CLOUD_OCR_TIMEOUT_MS = 14_000;
-const PHONE_OCR_TIMEOUT_MS = 5_000;
+const CLOUD_OCR_TIMEOUT_MS = 32_000;
+const PHONE_OCR_TIMEOUT_MS = 8_000;
 const SCAN_CLOUD_MAX_EDGE = 1800;
 const EMPTY_FIELDS: LabelOcrFields = { job: "", fabric: "", size: "" };
 
@@ -201,9 +201,9 @@ function prepareCloudRequest(source: HTMLCanvasElement): LabelOcrRequest {
 }
 
 function shouldSkipPhoneFallback(outcome: LabelOcrCloudOutcome): boolean {
-  // Phone Tesseract adds 5–15s and is weak on marker handwriting — rely on Gemini/cloud first.
   if (hasAnyLabelField(outcome.fields)) return true;
-  if (outcome.status === "timeout" || outcome.status === "error") return true;
+  if (outcome.status === "error") return true;
+  if (outcome.status === "timeout") return false;
   if (outcome.provider?.includes("gemini") && outcome.status !== "no_text") return true;
   return scoreParsedLabelFields(outcome.fields) >= 20;
 }
@@ -332,7 +332,7 @@ export async function recognizeLabelFieldsCloudWithStatus(
 async function recognizeLabelFieldsCloudInner(request: LabelOcrRequest): Promise<LabelOcrCloudOutcome> {
   const sb = getSupabase();
   if (!sb) {
-    return { fields: EMPTY_FIELDS, status: "error" };
+    return { fields: EMPTY_FIELDS, status: "error", detail: "cloud_not_configured" };
   }
 
   const {
@@ -404,6 +404,9 @@ export function labelScanStatusMessage(status: LabelOcrCloudStatus, detail?: str
     case "timeout":
       return "Slow connection — tap Scan again or fix fields below.";
     case "error":
+      if (detail === "cloud_not_configured") {
+        return "App missing Supabase settings — type the three lines below.";
+      }
       return "Couldn’t read — tap Scan again or fix fields below.";
     case "no_text":
       if (detail === "gemini_not_configured") {

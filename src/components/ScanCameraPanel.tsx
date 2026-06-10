@@ -20,7 +20,7 @@ import { captureVideoFrame, decodeQrFromCanvas } from "@/lib/scanQrFromImage";
 
 type ScanMode = "qr" | "label";
 
-const SCAN_HARD_CAP_MS = 16_000;
+const SCAN_HARD_CAP_MS = 40_000;
 const LABEL_FOCUS_MS = 150;
 
 type Props = {
