@@ -2,9 +2,6 @@
 
 import { Capacitor, registerPlugin } from "@capacitor/core";
 import {
-  looksLikeWeakFabricLine,
-  looksLikeWeakJobLine,
-  looksLikeWeakSizeLine,
   parseRawTextToLabelFields,
   polishLabelFields,
   type LabelOcrFields,
@@ -24,28 +21,14 @@ const FabricLabelOcr = registerPlugin<FabricLabelOcrPlugin>("FabricLabelOcr", {
   web: () => import("./labelOcrNative.web").then((m) => new m.FabricLabelOcrWeb()),
 });
 
-let availability: boolean | null = null;
-
 async function nativeAvailable(): Promise<boolean> {
   if (!Capacitor.isNativePlatform()) return false;
-  if (availability !== null) return availability;
   try {
     const { available } = await FabricLabelOcr.isAvailable();
-    availability = available;
     return available;
   } catch {
-    availability = false;
     return false;
   }
-}
-
-function isStrongNativeFields(fields: LabelOcrFields): boolean {
-  if (!fields.job && !fields.fabric && !fields.size) return false;
-  return (
-    !looksLikeWeakJobLine(fields.job) &&
-    !looksLikeWeakFabricLine(fields.fabric) &&
-    !looksLikeWeakSizeLine(fields.size)
-  );
 }
 
 /** Run Apple Vision / ML Kit when the native app is installed. */
@@ -60,7 +43,8 @@ export async function recognizeLabelOnDevice(base64: string): Promise<LabelOcrFi
       fabric: result.fabric || parsed.fabric,
       size: result.size || parsed.size,
     });
-    return isStrongNativeFields(fields) || hasAny(fields) ? fields : null;
+    if (!hasAny(fields)) return null;
+    return fields;
   } catch {
     return null;
   }

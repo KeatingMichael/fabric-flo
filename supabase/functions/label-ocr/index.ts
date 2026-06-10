@@ -127,9 +127,23 @@ Deno.serve(async (req) => {
       structuredFields = geminiBest.fields;
       structuredProvider = geminiBest.provider;
       geminiDetail = geminiBest.detail;
+
+      if (!structuredFields || !hasAnyField(structuredFields)) {
+        for (const img of images.slice(0, 3)) {
+          for (const model of GEMINI_MODELS) {
+            const plain = await runGeminiPlainText(img, geminiKey, model);
+            if (plain && hasAnyField(plain)) {
+              structuredFields = normalizeStructuredFields(plain);
+              structuredProvider = `gemini-plain:${model}`;
+              break;
+            }
+          }
+          if (structuredFields && hasAnyField(structuredFields)) break;
+        }
+      }
     }
 
-    if (structuredFields && hasAnyField(structuredFields) && scoreFields(structuredFields) >= 25) {
+    if (structuredFields && hasAnyField(structuredFields) && scoreFields(structuredFields) >= 15) {
       const text = fieldsToText(structuredFields);
       return json({
         text,
@@ -232,28 +246,41 @@ async function runGeminiBest(
   images: string[],
   strips: string[]
 ): Promise<{ fields: LabelFields | null; provider: string; detail?: string }> {
-  const primary = images[0];
-  if (!primary) return { fields: null, provider: "gemini" };
+  if (!images[0]) return { fields: null, provider: "gemini" };
 
-  const primaryResults = await Promise.all(
-    GEMINI_MODELS.map((model) =>
-      runGeminiStructured(primary, apiKey, "full", model).then((fields) => ({ fields, model }))
-    )
-  );
+  const collected: LabelFields[] = [];
+  let winnerModel = GEMINI_MODELS[0]!;
 
-  const collected: LabelFields[] = primaryResults
-    .map((r) => r.fields)
-    .filter((f): f is LabelFields => Boolean(f && hasAnyField(f)));
+  for (const img of images.slice(0, 3)) {
+    const primaryResults = await Promise.all(
+      GEMINI_MODELS.map((model) =>
+        runGeminiStructured(img, apiKey, "full", model).then((fields) => ({ fields, model }))
+      )
+    );
+
+    for (const result of primaryResults) {
+      if (result.fields && hasAnyField(result.fields)) {
+        collected.push(result.fields);
+        if (scoreFields(normalizeStructuredFields(result.fields)) >= 45) {
+          winnerModel = result.model;
+        }
+      }
+    }
+
+    const mergedEarly = mergeBestGeminiFields(collected);
+    if (mergedEarly) {
+      const normalized = normalizeStructuredFields(mergedEarly);
+      if (scoreFields(normalized) >= 45) {
+        return { fields: normalized, provider: `gemini:${winnerModel}` };
+      }
+    }
+  }
 
   let merged = mergeBestGeminiFields(collected);
   if (merged) {
     const normalized = normalizeStructuredFields(merged);
     if (scoreFields(normalized) >= 45) {
-      const winner =
-        primaryResults.find(
-          (r) => r.fields && scoreFields(normalizeStructuredFields(r.fields)) >= 45
-        ) ?? primaryResults[0];
-      return { fields: normalized, provider: `gemini:${winner?.model ?? GEMINI_MODELS[0]}` };
+      return { fields: normalized, provider: `gemini:${winnerModel}` };
     }
   }
 

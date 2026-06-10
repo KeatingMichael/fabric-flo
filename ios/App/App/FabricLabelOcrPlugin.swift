@@ -25,21 +25,16 @@ public class FabricLabelOcrPlugin: CAPPlugin, CAPBridgedPlugin {
         let payload = base64.contains(",") ? String(base64.split(separator: ",").last ?? "") : base64
         guard let data = Data(base64Encoded: payload, options: .ignoreUnknownCharacters),
               let image = UIImage(data: data),
-              let cgImage = image.cgImage else {
+              let cgImage = Self.orientedCGImage(from: image) else {
             call.reject("invalid_image")
             return
         }
 
-        let request = VNRecognizeTextRequest { request, error in
-            if let error = error {
-                call.reject("vision_error", error.localizedDescription, error)
-                return
-            }
-
-            let observations = request.results as? [VNRecognizedTextObservation] ?? []
-            let lines = observations.compactMap { obs in
-                obs.topCandidates(1).first?.string.trimmingCharacters(in: .whitespacesAndNewlines)
-            }.filter { !$0.isEmpty }
+        DispatchQueue.global(qos: .userInitiated).async {
+            let accurate = Self.recognizeLines(in: cgImage, level: .accurate)
+            let lines = accurate.isEmpty
+                ? Self.recognizeLines(in: cgImage, level: .fast)
+                : accurate
 
             let rawText = lines.joined(separator: "\n")
             let fields = Self.parseLabelLines(lines)
@@ -51,19 +46,46 @@ public class FabricLabelOcrPlugin: CAPPlugin, CAPBridgedPlugin {
                 "rawText": rawText
             ])
         }
+    }
 
-        request.recognitionLevel = .accurate
+    private static func orientedCGImage(from image: UIImage) -> CGImage? {
+        if image.imageOrientation == .up, let cgImage = image.cgImage {
+            return cgImage
+        }
+
+        let format = UIGraphicsImageRendererFormat.default()
+        format.scale = 1
+        let renderer = UIGraphicsImageRenderer(size: image.size, format: format)
+        let normalized = renderer.image { _ in
+            image.draw(in: CGRect(origin: .zero, size: image.size))
+        }
+        return normalized.cgImage
+    }
+
+    private static func recognizeLines(in cgImage: CGImage, level: VNRequestTextRecognitionLevel) -> [String] {
+        let request = VNRecognizeTextRequest()
+        request.recognitionLevel = level
         request.usesLanguageCorrection = true
         request.recognitionLanguages = ["en-US"]
+        request.customWords = [
+            "SOLID", "BLUE", "FOAM", "MUSLIN", "DUVET", "VELVET", "CHROMA", "BOUNCE", "SCRIM"
+        ]
 
         let handler = VNImageRequestHandler(cgImage: cgImage, options: [:])
-        DispatchQueue.global(qos: .userInitiated).async {
-            do {
-                try handler.perform([request])
-            } catch {
-                call.reject("vision_failed", error.localizedDescription, error)
-            }
+        do {
+            try handler.perform([request])
+        } catch {
+            return []
         }
+
+        let observations = request.results as? [VNRecognizedTextObservation] ?? []
+        let sorted = observations.sorted { lhs, rhs in
+            lhs.boundingBox.midY > rhs.boundingBox.midY
+        }
+
+        return sorted.compactMap { obs in
+            obs.topCandidates(1).first?.string.trimmingCharacters(in: .whitespacesAndNewlines)
+        }.filter { !$0.isEmpty }
     }
 
     private static func parseLabelLines(_ lines: [String]) -> (job: String, fabric: String, size: String) {
@@ -76,7 +98,7 @@ public class FabricLabelOcrPlugin: CAPPlugin, CAPBridgedPlugin {
             if trimmed.isEmpty { continue }
 
             let digits = trimmed.replacingOccurrences(of: "[^0-9]", with: "", options: .regularExpression)
-            if digits.count >= 5 && digits.count <= 8 && job.isEmpty {
+            if digits.count >= 4 && digits.count <= 8 && job.isEmpty {
                 job = digits
                 continue
             }

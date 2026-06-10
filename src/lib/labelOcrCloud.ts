@@ -1,7 +1,10 @@
 import { Capacitor } from "@capacitor/core";
 import {
+  prepareLabelScanCanvas,
   prepareRawGuideForOcr,
+  preprocessLabelBinarize,
   scaleCanvas,
+  scaleWhiteLabel,
 } from "@/lib/labelOcrImage";
 import {
   looksLikeWeakFabricLine,
@@ -137,7 +140,10 @@ function sanitizeLabelFields(fields: LabelOcrFields): LabelOcrFields {
 function fieldsFromPayload(payload: LabelOcrResponse | null): LabelOcrFields {
   if (payload?.fields && hasAnyLabelField(payload.fields)) {
     const raw = payload.text?.trim() || payload.rawText?.trim() || collectOcrTexts(payload)[0] || "";
-    return sanitizeLabelFields(polishLabelFields(raw, payload.fields));
+    const polished = polishLabelFields(raw, payload.fields);
+    const sanitized = sanitizeLabelFields(polished);
+    if (hasAnyLabelField(sanitized)) return sanitized;
+    return polished;
   }
   const texts = collectOcrTexts(payload);
   if (!texts.length) return EMPTY_FIELDS;
@@ -173,17 +179,21 @@ function toBase64(canvas: HTMLCanvasElement): string {
 
 function prepareCloudRequest(source: HTMLCanvasElement): LabelOcrRequest {
   const raw = prepareRawGuideForOcr(source, SCAN_CLOUD_MAX_EDGE);
+  const white = scaleWhiteLabel(source, SCAN_CLOUD_MAX_EDGE);
+  const contrast = prepareLabelScanCanvas(source, SCAN_CLOUD_MAX_EDGE);
   return {
     imageBase64: toBase64(raw),
-    stripsBase64: stripBase64Payload(raw),
+    altImageBase64: toBase64(contrast),
+    extraImagesBase64: [toBase64(preprocessLabelBinarize(white))],
+    stripsBase64: stripBase64Payload(white),
   };
 }
 
 function shouldSkipPhoneFallback(outcome: LabelOcrCloudOutcome): boolean {
-  // Phone Tesseract adds 5–15s and is weak on marker handwriting — rely on Gemini/cloud.
+  // Phone Tesseract adds 5–15s and is weak on marker handwriting — rely on Gemini/cloud first.
   if (hasAnyLabelField(outcome.fields)) return true;
   if (outcome.status === "timeout" || outcome.status === "error") return true;
-  if (outcome.provider?.includes("gemini") || outcome.detail === "ocr_miss") return true;
+  if (outcome.provider?.includes("gemini") && outcome.status !== "no_text") return true;
   return scoreParsedLabelFields(outcome.fields) >= 20;
 }
 
@@ -207,18 +217,44 @@ function outcomeFromFields(
   };
 }
 
-/** Native → cloud (Gemini structured) → on-phone Tesseract fallback. */
+function mergeNativeAttempts(...attempts: Array<LabelOcrFields | null>): LabelOcrFields | null {
+  let best: LabelOcrFields = EMPTY_FIELDS;
+  let bestScore = 0;
+  for (const attempt of attempts) {
+    if (!attempt || !hasAnyLabelField(attempt)) continue;
+    const score = scoreParsedLabelFields(attempt);
+    if (score > bestScore) {
+      best = attempt;
+      bestScore = score;
+    }
+  }
+  return bestScore > 0 ? best : null;
+}
+
+/** Native + cloud (Gemini) in parallel → on-phone Tesseract fallback. */
 export async function scanLabelFromCapture(
   source: HTMLCanvasElement,
   _jpegDataUrl?: string,
   onPhase?: (phase: ScanReadPhase) => void
 ): Promise<LabelScanOutcome> {
-  const jpegBase64 = source.toDataURL("image/jpeg", 0.9).replace(/^data:image\/\w+;base64,/, "");
+  const rawCanvas = prepareRawGuideForOcr(source, 2200);
+  const prepCanvas = prepareLabelScanCanvas(source, 2200);
+  const rawBase64 = toBase64(rawCanvas);
+  const prepBase64 = toBase64(prepCanvas);
 
   onPhase?.("native");
-  const nativeFields = Capacitor.isNativePlatform()
-    ? await recognizeLabelOnDevice(jpegBase64)
-    : null;
+  const nativePromise = Capacitor.isNativePlatform()
+    ? Promise.all([
+        recognizeLabelOnDevice(rawBase64),
+        recognizeLabelOnDevice(prepBase64),
+      ]).then((attempts) => mergeNativeAttempts(...attempts))
+    : Promise.resolve(null);
+
+  onPhase?.("cloud");
+  const cloudPromise = recognizeLabelFieldsCloudWithStatus(prepareCloudRequest(source));
+
+  const [nativeFields, cloudOutcome] = await Promise.all([nativePromise, cloudPromise]);
+
   if (nativeFields && scoreFields(nativeFields) === "success") {
     return {
       ...outcomeFromFields(nativeFields, "native-vision"),
@@ -226,13 +262,13 @@ export async function scanLabelFromCapture(
     };
   }
 
-  onPhase?.("cloud");
-  let outcome = await recognizeLabelFieldsCloudWithStatus(prepareCloudRequest(source));
+  let outcome = cloudOutcome;
   if (nativeFields && hasAnyLabelField(nativeFields)) {
+    const merged = mergeIfBetter(outcome.fields, sanitizeLabelFields(nativeFields));
     outcome = {
       ...outcome,
-      fields: mergeIfBetter(outcome.fields, sanitizeLabelFields(nativeFields)),
-      status: scoreFields(mergeIfBetter(outcome.fields, sanitizeLabelFields(nativeFields))),
+      fields: merged,
+      status: scoreFields(merged),
       provider: outcome.provider ?? "native-vision",
     };
   }
@@ -250,6 +286,10 @@ export async function scanLabelFromCapture(
         provider: outcome.provider ?? "phone-tesseract",
       };
     }
+  }
+
+  if (hasAnyLabelField(outcome.fields) && outcome.status === "no_text") {
+    outcome = { ...outcome, status: scoreFields(outcome.fields) };
   }
 
   return {
@@ -359,6 +399,9 @@ export function labelScanStatusMessage(status: LabelOcrCloudStatus, detail?: str
       }
       if (detail === "google_api_disabled") {
         return "Enable Cloud Vision API in Google Cloud, or type the three lines below.";
+      }
+      if (detail === "ocr_miss") {
+        return "Couldn’t read this label — type the three lines below, or Scan again with the paper centered.";
       }
       return "No text detected — type the three lines below, or Scan again in brighter light.";
     case "partial":
