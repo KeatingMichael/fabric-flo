@@ -23,6 +23,10 @@ const guides = [
     out: join(root, "docs", "Fabric_Flo_START_HERE.pdf"),
   },
   {
+    md: join(root, "docs", "WINDOWS_QUICK_START.md"),
+    out: join(root, "docs", "Fabric_Flo_Windows_Quick_Start.pdf"),
+  },
+  {
     md: join(root, "docs", "TRANSFER_TO_WINDOWS.md"),
     out: join(root, "docs", "Fabric_Flo_Transfer_To_Windows.pdf"),
   },
